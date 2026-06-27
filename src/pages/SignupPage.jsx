@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { useAuth } from '../context/AuthContext';
 
 export default function SignupPage() {
   const [name, setName] = useState('');
@@ -10,6 +11,13 @@ export default function SignupPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { session, profile } = useAuth();
+
+  useEffect(() => {
+    if (session && profile) {
+      navigate(profile.role === 'admin' ? '/admin' : '/entregas', { replace: true });
+    }
+  }, [session, profile, navigate]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -47,7 +55,8 @@ export default function SignupPage() {
       return;
     }
 
-    navigate('/entregas');
+    // não navega aqui — o useEffect acima faz isso assim que o perfil
+    // (recém-criado) terminar de carregar no contexto
   }
 
   return (

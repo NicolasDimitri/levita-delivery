@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -8,6 +9,16 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { session, profile } = useAuth();
+
+  // Só redireciona quando o perfil (admin/driver) já estiver carregado no
+  // contexto — evita o "volta pro login sozinho" que acontecia quando
+  // navegávamos assim que o login respondia, sem esperar o perfil.
+  useEffect(() => {
+    if (session && profile) {
+      navigate(profile.role === 'admin' ? '/admin' : '/entregas', { replace: true });
+    }
+  }, [session, profile, navigate]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -16,15 +27,14 @@ export default function LoginPage() {
 
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
-    setLoading(false);
-
     if (signInError) {
+      setLoading(false);
       setError('E-mail ou senha incorretos.');
       return;
     }
 
-    // o AuthContext vai carregar o perfil; a rota raiz decide pra onde mandar
-    navigate('/');
+    // não navega aqui — o useEffect acima faz isso assim que o perfil
+    // (admin/driver) terminar de carregar no contexto
   }
 
   return (
