@@ -7,6 +7,7 @@ import DeliveryCard from '../components/DeliveryCard';
 export default function DriverPage() {
   const { signOut, profile, session } = useAuth();
   const [orders, setOrders] = useState([]);
+  const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const loadOrders = useCallback(async () => {
@@ -14,27 +15,44 @@ export default function DriverPage() {
       .from('orders')
       .select('*, order_items(*)')
       .eq('driver_id', session.user.id)
-      .eq('status', 'a_caminho')
+      .eq('status', 'em_preparo')
       .order('assigned_at', { ascending: true });
 
     setOrders(data || []);
     setLoading(false);
   }, [session]);
 
+  // Soma do delivery_history — só entra linha ali DEPOIS que o código de
+  // entrega é validado com sucesso pelo iFood (veja api/ifood/verify-delivery.js),
+  // então o saldo nunca conta uma entrega só por ter sido atribuída.
+  const loadBalance = useCallback(async () => {
+    const { data } = await supabase
+      .from('delivery_history')
+      .select('valor_entrega')
+      .eq('driver_id', session.user.id);
+
+    const total = (data || []).reduce((sum, row) => sum + Number(row.valor_entrega), 0);
+    setBalance(total);
+  }, [session]);
+
   useEffect(() => {
     loadOrders();
+    loadBalance();
 
     const channel = supabase
       .channel('driver-orders')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders', filter: `driver_id=eq.${session.user.id}` },
-        () => loadOrders()
+        () => {
+          loadOrders();
+          loadBalance();
+        }
       )
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [loadOrders, session]);
+  }, [loadOrders, loadBalance, session]);
 
   return (
     <div className="min-h-screen p-4">
@@ -47,6 +65,11 @@ export default function DriverPage() {
           <button onClick={signOut} className="text-sm text-gray-500 hover:text-gray-800">
             Sair
           </button>
+        </div>
+
+        <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Saldo de entregas concluídas</p>
+          <p className="text-2xl font-semibold text-green-700">R$ {balance.toFixed(2)}</p>
         </div>
 
         {loading && <p className="text-gray-500">Carregando...</p>}

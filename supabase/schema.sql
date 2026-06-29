@@ -67,7 +67,15 @@ create table public.orders (
   -- itens (guardados também em tabelas filhas, ver abaixo)
   -- status do ciclo de vida no SEU sistema (não confundir com status do iFood)
   status text not null default 'recebido'
-    check (status in ('recebido', 'em_preparo', 'a_caminho', 'entregue', 'cancelado')),
+    check (status in ('recebido', 'em_preparo', 'entregue', 'cancelado')),
+
+  -- previsão de entrega que o próprio iFood calcula (considera distância,
+  -- trânsito etc.) - vem em delivery.deliveryDateTime no pedido
+  delivery_date_time timestamptz,
+
+  -- despachar pro iFood (avisa o cliente que saiu) e atribuir entregador
+  -- são ações INDEPENDENTES — uma não implica a outra
+  ifood_dispatched_at timestamptz,
 
   -- confirmação de entrega (código do iFood, ver verifyDeliveryCode)
   requires_delivery_code boolean not null default true,
@@ -134,6 +142,37 @@ create table public.webhook_events (
   id text primary key,
   received_at timestamptz not null default now()
 );
+
+-- ============================================================
+-- GRANTS: permissão de base para o role "authenticated" tentar
+-- acessar as tabelas. Sem isso, o Postgres bloqueia com "permission
+-- denied" ANTES de sequer avaliar as policies de RLS abaixo — RLS
+-- só refina QUAIS linhas, não substitui essa permissão de tabela.
+-- (Tabelas criadas via SQL puro não recebem isso automaticamente,
+-- diferente de tabelas criadas pela interface visual do Supabase.)
+-- ============================================================
+grant usage on schema public to authenticated;
+
+grant select, insert on public.profiles to authenticated;
+grant select on public.clientes to authenticated;
+grant select on public.orders to authenticated;
+grant select on public.order_items to authenticated;
+grant select on public.order_item_additions to authenticated;
+grant select on public.delivery_history to authenticated;
+
+-- o service_role IGNORA as policies de RLS, mas ainda precisa do GRANT de
+-- base na tabela (são duas camadas diferentes — veja o comentário acima).
+-- Sem isso, as funções serverless em /api (que usam a service_role key)
+-- recebem "permission denied" mesmo fazendo tudo certo no resto.
+grant usage on schema public to service_role;
+
+grant all on public.profiles to service_role;
+grant all on public.clientes to service_role;
+grant all on public.orders to service_role;
+grant all on public.order_items to service_role;
+grant all on public.order_item_additions to service_role;
+grant all on public.delivery_history to service_role;
+grant all on public.webhook_events to service_role;
 
 -- ============================================================
 -- FUNÇÃO AUXILIAR: is_admin()
