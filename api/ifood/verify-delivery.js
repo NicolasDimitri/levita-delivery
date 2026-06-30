@@ -27,6 +27,10 @@ export default async function handler(req, res) {
   const requesterId = userData.user.id;
 
   const { orderId, code, useStoredCode } = req.body || {};
+
+  console.log('=== [VERIFY-DELIVERY] requisição recebida do app do entregador ===');
+  console.log(JSON.stringify({ orderId, code, useStoredCode, requesterId }, null, 2));
+
   if (!orderId) {
     return res.status(400).json({ error: 'orderId é obrigatório' });
   }
@@ -76,9 +80,13 @@ export default async function handler(req, res) {
   let result;
   try {
     result = await verifyDeliveryCode(order.ifood_order_id, codeToUse);
+    console.log('=== [VERIFY-DELIVERY] resposta do iFood (verifyDeliveryCode) ===');
+    console.log(JSON.stringify(result, null, 2));
   } catch (err) {
-    console.error(err);
-    return res.status(502).json({ error: 'Erro ao validar código no iFood' });
+    console.error('=== [VERIFY-DELIVERY] erro retornado pelo iFood ===');
+    console.error(err.message);
+    // devolve o motivo real pro frontend, em vez de uma mensagem genérica
+    return res.status(502).json({ error: err.message });
   }
 
   if (!result.valid) {
