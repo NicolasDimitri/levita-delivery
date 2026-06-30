@@ -2,6 +2,12 @@
 -- SCHEMA COMPLETO - Sistema de Entregas iFood
 -- Execute este arquivo inteiro no SQL Editor do Supabase
 -- (Supabase Dashboard > SQL Editor > New Query > cole tudo > Run)
+--
+-- Use este arquivo para recriar o banco do ZERO (projeto novo, ou
+-- projeto resetado). Ele já inclui todas as correções identificadas
+-- durante o debug do sistema: GRANT de update em orders (necessário
+-- pra atribuir entregador pelo frontend), e a constraint de status
+-- já na versão final usada pelo código.
 -- ============================================================
 
 -- Extensão necessária para gen_random_uuid()
@@ -155,7 +161,14 @@ grant usage on schema public to authenticated;
 
 grant select, insert on public.profiles to authenticated;
 grant select on public.clientes to authenticated;
-grant select on public.orders to authenticated;
+
+-- "update" em orders é necessário pra tela de admin conseguir atribuir
+-- entregador (OrderCard.jsx faz supabase.from('orders').update(...) direto
+-- do frontend, com a anon key). A RLS policy "admin acesso total a orders"
+-- já restringe ISSO a quem é admin — o GRANT só libera a operação em si,
+-- sem ele o Postgres bloqueia antes mesmo de avaliar a policy.
+grant select, update on public.orders to authenticated;
+
 grant select on public.order_items to authenticated;
 grant select on public.order_item_additions to authenticated;
 grant select on public.delivery_history to authenticated;
