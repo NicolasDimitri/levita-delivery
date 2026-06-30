@@ -9,6 +9,16 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { dispatchOrder } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
+  console.log('=== [API /api/ifood/dispatch] REQUISIÇÃO RECEBIDA ===');
+  console.log(JSON.stringify({
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    query: req.query,
+    body: req.body,
+    cookies: req.cookies
+  }, null, 2));
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -17,6 +27,8 @@ export default async function handler(req, res) {
   const jwt = authHeader.replace('Bearer ', '');
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
+    console.log('=== [API /api/ifood/dispatch] FALHA NA AUTENTICAÇÃO ===');
+    console.log(JSON.stringify({ userError, userData }, null, 2));
     return res.status(401).json({ error: 'Não autenticado' });
   }
 
@@ -40,16 +52,26 @@ export default async function handler(req, res) {
 
   try {
     const ifoodRes = await dispatchOrder(order.ifood_order_id);
+    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (dispatchOrder) ===');
+    console.log(JSON.stringify({ status: ifoodRes.status, ok: ifoodRes.ok, headers: Object.fromEntries(ifoodRes.headers.entries()) }, null, 2));
     if (!ifoodRes.ok) {
       const text = await ifoodRes.text();
+      console.log('=== [API /api/ifood/dispatch] CORPO DE ERRO DO IFOOD ===');
+      console.log(text);
       return res.status(502).json({ error: `iFood recusou o despacho: ${text}` });
     }
   } catch (err) {
+    console.error('=== [API /api/ifood/dispatch] EXCEÇÃO AO CHAMAR IFOOD ===');
     console.error(err);
     return res.status(502).json({ error: 'Erro ao despachar pedido no iFood' });
   }
 
-  await supabaseAdmin.from('orders').update({ ifood_dispatched_at: new Date().toISOString() }).eq('id', order.id);
+  const { error: updateError } = await supabaseAdmin.from('orders').update({ ifood_dispatched_at: new Date().toISOString() }).eq('id', order.id);
+  if (updateError) {
+    console.error('=== [API /api/ifood/dispatch] ERRO AO ATUALIZAR ORDERS NO SUPABASE ===');
+    console.error(JSON.stringify(updateError, null, 2));
+  }
 
+  console.log('=== [API /api/ifood/dispatch] SUCESSO — respondendo 200 ===');
   return res.status(200).json({ ok: true });
 }

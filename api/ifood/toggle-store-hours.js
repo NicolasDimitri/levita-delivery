@@ -11,6 +11,16 @@ const HORARIO_INICIO = '09:00:00';
 const HORARIO_DURACAO_MINUTOS = 360; // 09:00 às 15:00 = 6 horas
 
 export default async function handler(req, res) {
+  console.log('=== [API /api/ifood/toggle-store-hours] REQUISIÇÃO RECEBIDA ===');
+  console.log(JSON.stringify({
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    query: req.query,
+    body: req.body,
+    cookies: req.cookies
+  }, null, 2));
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -19,6 +29,8 @@ export default async function handler(req, res) {
   const jwt = authHeader.replace('Bearer ', '');
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
+    console.log('=== [API /api/ifood/toggle-store-hours] FALHA NA AUTENTICAÇÃO ===');
+    console.log(JSON.stringify({ userError, userData }, null, 2));
     return res.status(401).json({ error: 'Não autenticado' });
   }
 
@@ -48,6 +60,8 @@ export default async function handler(req, res) {
   for (const merchantId of merchantIds) {
     try {
       const currentShifts = await getOpeningHours(merchantId);
+      console.log(`=== [API /api/ifood/toggle-store-hours] shifts atuais da loja ${merchantId} ===`);
+      console.log(JSON.stringify(currentShifts, null, 2));
 
       // remove qualquer turno de hoje que já exista (pra não duplicar ao abrir)
       const shiftsSemHoje = currentShifts
@@ -59,14 +73,20 @@ export default async function handler(req, res) {
           ? [...shiftsSemHoje, { dayOfWeek: today, start: HORARIO_INICIO, duration: HORARIO_DURACAO_MINUTOS }]
           : shiftsSemHoje;
 
+      console.log(`=== [API /api/ifood/toggle-store-hours] novos shifts a enviar (loja ${merchantId}) ===`);
+      console.log(JSON.stringify(novosShifts, null, 2));
+
       await setOpeningHours(merchantId, novosShifts);
       results.push({ merchantId, ok: true });
     } catch (err) {
-      console.error(`Erro ao ${action === 'open' ? 'abrir' : 'fechar'} loja ${merchantId}`, err);
+      console.error(`=== [API /api/ifood/toggle-store-hours] ERRO ao ${action === 'open' ? 'abrir' : 'fechar'} loja ${merchantId} ===`);
+      console.error(err);
       results.push({ merchantId, ok: false, error: err.message });
     }
   }
 
   const allOk = results.every((r) => r.ok);
+  console.log('=== [API /api/ifood/toggle-store-hours] SUCESSO — respondendo ===');
+  console.log(JSON.stringify({ action, today, results, allOk }, null, 2));
   return res.status(allOk ? 200 : 207).json({ action, today, results });
 }

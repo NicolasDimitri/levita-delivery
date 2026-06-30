@@ -38,12 +38,23 @@ function isValidSignature(rawBody, signatureHeader) {
 }
 
 export default async function handler(req, res) {
+  console.log('=== [API /api/ifood/webhook] REQUISIÇÃO RECEBIDA ===');
+  console.log(JSON.stringify({
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    query: req.query
+  }, null, 2));
+
   if (req.method !== 'POST') {
     return res.status(405).send('Method not allowed');
   }
 
   const rawBody = await readRawBody(req);
   const signature = req.headers['x-ifood-signature'];
+
+  console.log('=== [API /api/ifood/webhook] RAW BODY (string) ===');
+  console.log(rawBody.toString('utf8'));
 
   if (!isValidSignature(rawBody, signature)) {
     console.warn('Webhook com assinatura inválida recebido');

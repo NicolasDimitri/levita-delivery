@@ -5,6 +5,16 @@
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 
 export default async function handler(req, res) {
+  console.log('=== [API /api/ifood/order-meta] REQUISIÇÃO RECEBIDA ===');
+  console.log(JSON.stringify({
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    query: req.query,
+    body: req.body,
+    cookies: req.cookies
+  }, null, 2));
+
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -13,6 +23,8 @@ export default async function handler(req, res) {
   const jwt = authHeader.replace('Bearer ', '');
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
+    console.log('=== [API /api/ifood/order-meta] FALHA NA AUTENTICAÇÃO ===');
+    console.log(JSON.stringify({ userError, userData }, null, 2));
     return res.status(401).json({ error: 'Não autenticado' });
   }
 
@@ -48,5 +60,7 @@ export default async function handler(req, res) {
     hasStoredCode = Boolean(cliente?.ultimo_codigo_confirmacao);
   }
 
+  console.log('=== [API /api/ifood/order-meta] SUCESSO — respondendo ===');
+  console.log(JSON.stringify({ hasStoredCode }, null, 2));
   return res.status(200).json({ hasStoredCode });
 }

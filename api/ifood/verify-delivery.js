@@ -13,6 +13,16 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { verifyDeliveryCode } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
+  console.log('=== [API /api/ifood/verify-delivery] REQUISIÇÃO RECEBIDA ===');
+  console.log(JSON.stringify({
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    query: req.query,
+    body: req.body,
+    cookies: req.cookies
+  }, null, 2));
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -22,6 +32,8 @@ export default async function handler(req, res) {
 
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
+    console.log('=== [API /api/ifood/verify-delivery] FALHA NA AUTENTICAÇÃO ===');
+    console.log(JSON.stringify({ userError, userData }, null, 2));
     return res.status(401).json({ error: 'Não autenticado' });
   }
   const requesterId = userData.user.id;
@@ -42,8 +54,13 @@ export default async function handler(req, res) {
     .single();
 
   if (orderError || !order) {
+    console.log('=== [API /api/ifood/verify-delivery] PEDIDO NÃO ENCONTRADO ===');
+    console.log(JSON.stringify({ orderId, orderError }, null, 2));
     return res.status(404).json({ error: 'Pedido não encontrado' });
   }
+
+  console.log('=== [API /api/ifood/verify-delivery] PEDIDO ENCONTRADO NO SUPABASE ===');
+  console.log(JSON.stringify(order, null, 2));
 
   // só o entregador responsável ou um admin pode confirmar essa entrega
   if (order.driver_id !== requesterId) {
@@ -93,32 +110,58 @@ export default async function handler(req, res) {
     return res.status(200).json({ valid: false });
   }
 
-  await supabaseAdmin
-    .from('orders')
-    .update({
-      status: 'entregue',
-      delivery_code_confirmado: codeToUse,
-      delivered_at: new Date().toISOString()
-    })
-    .eq('id', order.id);
-
-  if (order.ifood_customer_id) {
-    await supabaseAdmin
-      .from('clientes')
+  // A partir daqui o iFood JÁ confirmou a entrega (não há como desfazer isso).
+  // Se qualquer escrita no Supabase falhar agora, precisamos pelo menos
+  // logar bem alto e ainda assim devolver valid:true pro entregador —
+  // já que a entrega É válida do ponto de vista do iFood — em vez de deixar
+  // a exception estourar sem resposta (o que gerava o "Unexpected end of
+  // JSON input" no frontend).
+  try {
+    const { error: updateOrderError } = await supabaseAdmin
+      .from('orders')
       .update({
-        ultimo_codigo_confirmacao: codeToUse,
-        ultimo_codigo_confirmado_em: new Date().toISOString()
+        status: 'entregue',
+        delivery_code_confirmado: codeToUse,
+        delivered_at: new Date().toISOString()
       })
-      .eq('ifood_customer_id', order.ifood_customer_id);
+      .eq('id', order.id);
+
+    if (updateOrderError) {
+      console.error('=== [VERIFY-DELIVERY] FALHA ao marcar pedido como entregue no Supabase ===');
+      console.error('Pedido iFood já confirmado, mas orders.update falhou:', updateOrderError);
+    }
+
+    if (order.ifood_customer_id) {
+      const { error: updateClienteError } = await supabaseAdmin
+        .from('clientes')
+        .update({
+          ultimo_codigo_confirmacao: codeToUse,
+          ultimo_codigo_confirmado_em: new Date().toISOString()
+        })
+        .eq('ifood_customer_id', order.ifood_customer_id);
+
+      if (updateClienteError) {
+        console.error('=== [VERIFY-DELIVERY] falha ao salvar codigo do cliente ===', updateClienteError);
+      }
+    }
+
+    if (order.driver_id) {
+      const { error: historyError } = await supabaseAdmin.from('delivery_history').insert({
+        driver_id: order.driver_id,
+        order_id: order.id,
+        valor_entrega: order.delivery_fee
+      });
+
+      if (historyError) {
+        console.error('=== [VERIFY-DELIVERY] falha ao registrar historico de entrega ===', historyError);
+      }
+    }
+  } catch (err) {
+    // nunca deixa um erro inesperado aqui derrubar a resposta sem corpo —
+    // a entrega já foi confirmada no iFood, então sempre respondemos valid:true
+    console.error('=== [VERIFY-DELIVERY] erro inesperado pós-confirmação iFood ===', err);
   }
 
-  if (order.driver_id) {
-    await supabaseAdmin.from('delivery_history').insert({
-      driver_id: order.driver_id,
-      order_id: order.id,
-      valor_entrega: order.delivery_fee
-    });
-  }
-
+  console.log('=== [API /api/ifood/verify-delivery] SUCESSO — respondendo valid:true ===');
   return res.status(200).json({ valid: true });
 }
