@@ -72,8 +72,9 @@ create table public.orders (
 
   -- itens (guardados também em tabelas filhas, ver abaixo)
   -- status do ciclo de vida no SEU sistema (não confundir com status do iFood)
+  -- fluxo: recebido -> em_preparo -> pronto -> em_rota -> entregue (ou cancelado a qualquer momento)
   status text not null default 'recebido'
-    check (status in ('recebido', 'em_preparo', 'entregue', 'cancelado')),
+    check (status in ('recebido', 'em_preparo', 'pronto', 'em_rota', 'entregue', 'cancelado')),
 
   -- previsão de entrega que o próprio iFood calcula (considera distância,
   -- trânsito etc.) - vem em delivery.deliveryDateTime no pedido
@@ -148,6 +149,8 @@ create table public.webhook_events (
   id text primary key,
   received_at timestamptz not null default now()
 );
+
+create index webhook_events_received_at_idx on public.webhook_events(received_at);
 
 -- ============================================================
 -- GRANTS: permissão de base para o role "authenticated" tentar

@@ -3,15 +3,18 @@ import { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import CountdownTimer from './CountdownTimer';
 
-const STATUS_LABELS = {
+export const STATUS_LABELS = {
   recebido: { label: 'Novo pedido', color: 'bg-gray-100 text-gray-700' },
   em_preparo: { label: 'Em preparo', color: 'bg-amber-100 text-amber-700' },
+  pronto: { label: 'Pronto', color: 'bg-purple-100 text-purple-700' },
+  em_rota: { label: 'Em rota', color: 'bg-blue-100 text-blue-700' },
   entregue: { label: 'Entregue', color: 'bg-green-100 text-green-700' },
   cancelado: { label: 'Cancelado', color: 'bg-red-100 text-red-700' }
 };
 
 export default function OrderCard({ order, drivers, onChanged }) {
   const [loadingAccept, setLoadingAccept] = useState(false);
+  const [loadingReady, setLoadingReady] = useState(false);
   const [loadingDispatch, setLoadingDispatch] = useState(false);
   const [loadingAssign, setLoadingAssign] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState(order.driver_id || '');
@@ -34,6 +37,13 @@ export default function OrderCard({ order, drivers, onChanged }) {
     return json;
   }
 
+  // Atualizações de status que NÃO envolvem a API do iFood são feitas direto
+  // no Supabase (a RLS já restringe isso a admin - "admin acesso total a orders").
+  async function updateStatus(newStatus) {
+    const { error: updateError } = await supabase.from('orders').update({ status: newStatus }).eq('id', order.id);
+    if (updateError) throw new Error(updateError.message);
+  }
+
   async function handleAccept() {
     setLoadingAccept(true);
     setError('');
@@ -47,10 +57,24 @@ export default function OrderCard({ order, drivers, onChanged }) {
     }
   }
 
+  async function handleMarkReady() {
+    setLoadingReady(true);
+    setError('');
+    try {
+      await updateStatus('pronto');
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoadingReady(false);
+    }
+  }
+
   async function handleDispatchToIfood() {
     setLoadingDispatch(true);
     setError('');
     try {
+      // o backend já avança o status pra em_rota junto com o aviso ao iFood
       await callApi('/api/ifood/dispatch', { orderId: order.id });
       onChanged?.();
     } catch (err) {
@@ -60,9 +84,6 @@ export default function OrderCard({ order, drivers, onChanged }) {
     }
   }
 
-  // Atribuir entregador é só uma escrita direta no Supabase — não chama o
-  // iFood, então não precisa passar por uma function serverless. O RLS já
-  // libera isso pro admin (veja "admin acesso total a orders" no schema).
   async function handleAssignDriver() {
     if (!selectedDriver) {
       setError('Selecione um entregador primeiro');
@@ -102,11 +123,10 @@ export default function OrderCard({ order, drivers, onChanged }) {
           label="Tempo p/ aceitar"
         />
       )}
-      {order.status === 'em_preparo' && order.delivery_date_time && (
-        <CountdownTimer target={order.delivery_date_time} label="Previsão de entrega" />
-      )}
+      {(order.status === 'em_preparo' || order.status === 'pronto' || order.status === 'em_rota') &&
+        order.delivery_date_time && <CountdownTimer target={order.delivery_date_time} label="Previsão de entrega" />}
 
-      <ul className="mb-2 space-y-1 text-sm text-gray-700">
+      <ul className="mb-2 mt-2 space-y-1 text-sm text-gray-700">
         {order.order_items?.map((item) => (
           <li key={item.id}>
             {item.quantity}x {item.name}
@@ -130,6 +150,7 @@ export default function OrderCard({ order, drivers, onChanged }) {
 
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
+      {/* recebido -> aceitar pedido junto ao iFood */}
       {order.status === 'recebido' && (
         <button
           onClick={handleAccept}
@@ -140,24 +161,20 @@ export default function OrderCard({ order, drivers, onChanged }) {
         </button>
       )}
 
+      {/* em_preparo -> marcar como pronto (cozinha terminou) */}
       {order.status === 'em_preparo' && (
-        <div className="space-y-2">
-          {/* Ação 1: avisar o iFood que o pedido saiu (independente do entregador) */}
-          {order.ifood_dispatched_at ? (
-            <p className="rounded-lg bg-gray-50 py-2 text-center text-sm text-gray-500">
-              ✓ Já despachado pro iFood
-            </p>
-          ) : (
-            <button
-              onClick={handleDispatchToIfood}
-              disabled={loadingDispatch}
-              className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-            >
-              {loadingDispatch ? 'Despachando...' : 'Despachar pro iFood'}
-            </button>
-          )}
+        <button
+          onClick={handleMarkReady}
+          disabled={loadingReady}
+          className="w-full rounded-lg bg-purple-600 py-2 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-60"
+        >
+          {loadingReady ? 'Atualizando...' : 'Marcar como pronto'}
+        </button>
+      )}
 
-          {/* Ação 2: atribuir entregador (independente do despacho pro iFood) */}
+      {/* pronto -> atribuir entregador + despachar pro iFood (ações independentes) */}
+      {order.status === 'pronto' && (
+        <div className="space-y-2">
           <div className="flex gap-2">
             <select
               value={selectedDriver}
@@ -184,8 +201,34 @@ export default function OrderCard({ order, drivers, onChanged }) {
               Entregador atribuído: {drivers.find((d) => d.id === order.driver_id)?.name || '—'}
             </p>
           )}
+
+          <button
+            onClick={handleDispatchToIfood}
+            disabled={loadingDispatch}
+            title={!order.driver_id ? 'Recomendado atribuir um entregador antes de despachar' : ''}
+            className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {loadingDispatch ? 'Despachando...' : 'Despachar pro iFood (sai pra entrega)'}
+          </button>
         </div>
       )}
+
+      {/* em_rota -> só acompanhamento, sem ação (espera o entregador confirmar com o código) */}
+      {order.status === 'em_rota' && (
+        <p className="text-sm text-gray-500">
+          Em rota com {drivers.find((d) => d.id === order.driver_id)?.name || 'entregador não identificado'} —
+          aguardando confirmação de entrega
+        </p>
+      )}
+
+      {/* entregue / cancelado -> só informativo, usado na aba de Finalizados */}
+      {order.status === 'entregue' && order.delivered_at && (
+        <p className="text-sm text-gray-500">
+          Entregue em {new Date(order.delivered_at).toLocaleString('pt-BR')}
+          {order.driver_id && ` por ${drivers.find((d) => d.id === order.driver_id)?.name || '—'}`}
+        </p>
+      )}
+      {order.status === 'cancelado' && <p className="text-sm text-gray-500">Pedido cancelado.</p>}
     </div>
   );
 }

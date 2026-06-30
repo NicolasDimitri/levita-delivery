@@ -66,7 +66,10 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Erro ao despachar pedido no iFood' });
   }
 
-  const { error: updateError } = await supabaseAdmin.from('orders').update({ ifood_dispatched_at: new Date().toISOString() }).eq('id', order.id);
+  const { error: updateError } = await supabaseAdmin
+    .from('orders')
+    .update({ ifood_dispatched_at: new Date().toISOString(), status: 'em_rota' })
+    .eq('id', order.id);
   if (updateError) {
     console.error('=== [API /api/ifood/dispatch] ERRO AO ATUALIZAR ORDERS NO SUPABASE ===');
     console.error(JSON.stringify(updateError, null, 2));

@@ -40,30 +40,80 @@ export default function ConfirmDeliveryModal({ order, onClose, onConfirmed }) {
 
     const recognition = new SpeechRecognitionApi();
     recognition.lang = 'pt-BR';
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    // continuous + interimResults: deixa escutando por mais tempo e vai
+    // capturando palavra por palavra, em vez de cortar no primeiro silêncio
+    // curto (que é o comportamento padrão com continuous=false e pode
+    // encerrar antes do entregador terminar de falar os 4 números).
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
     setError('');
+    setCode('');
     setListening(true);
+    let capturedDigits = '';
+
+    // timeout de segurança: se em 10s não capturou nada, para sozinho
+    // (sem isso, "continuous: true" ficaria escutando pra sempre)
+    const safetyTimeout = setTimeout(() => {
+      console.log('[mic] timeout de 10s atingido, parando');
+      recognition.stop();
+    }, 10000);
+
+    recognition.onstart = () => {
+      console.log('[mic] reconhecimento iniciado, fale os números');
+    };
 
     recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      const digits = extractDigitsFromSpeech(transcript);
+      // junta tudo que já foi reconhecido até agora (parcial + final)
+      let fullTranscript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        fullTranscript += event.results[i][0].transcript + ' ';
+      }
+      console.log('[mic] transcrição parcial recebida:', fullTranscript);
+
+      const digits = extractDigitsFromSpeech(fullTranscript);
+      console.log('[mic] dígitos extraídos até agora:', digits);
+
       if (digits) {
+        capturedDigits = digits;
         setCode(digits);
-      } else {
-        setError('Não entendi nenhum número. Tente de novo ou digite o código.');
+      }
+
+      // assim que tiver 4 dígitos, não precisa mais escutar
+      if (digits.length === 4) {
+        clearTimeout(safetyTimeout);
+        recognition.stop();
       }
     };
 
-    recognition.onerror = () => {
-      setError('Erro ao ouvir o áudio. Tente de novo ou digite o código.');
+    recognition.onerror = (event) => {
+      console.error('[mic] erro do reconhecimento de voz:', event.error);
+      const messages = {
+        'not-allowed': 'Permissão de microfone negada. Habilite o microfone para este site nas configurações do navegador.',
+        'no-speech': 'Nenhuma fala detectada. Tente falar mais perto do microfone.',
+        'audio-capture': 'Nenhum microfone encontrado neste dispositivo.',
+        network: 'Erro de conexão durante o reconhecimento de voz. Tente novamente.'
+      };
+      setError(messages[event.error] || `Erro ao ouvir o áudio (${event.error}). Tente de novo ou digite o código.`);
     };
 
-    recognition.onend = () => setListening(false);
+    recognition.onend = () => {
+      console.log('[mic] reconhecimento encerrado, dígitos capturados:', capturedDigits);
+      clearTimeout(safetyTimeout);
+      setListening(false);
+      if (!capturedDigits) {
+        setError((prev) => prev || 'Não entendi nenhum número. Tente de novo ou digite o código.');
+      }
+    };
 
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (err) {
+      console.error('[mic] falha ao iniciar recognition.start()', err);
+      setError('Não foi possível iniciar o microfone. Tente novamente.');
+      setListening(false);
+    }
   }
 
   useEffect(() => {

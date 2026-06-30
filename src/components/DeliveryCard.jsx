@@ -34,11 +34,21 @@ export default function DeliveryCard({ order, onChanged }) {
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="mb-3">
-        <p className="font-semibold">{order.customer_name}</p>
-        <p className="text-sm text-gray-600">{fullAddress}</p>
-        {order.delivery_date_time && <CountdownTimer target={order.delivery_date_time} label="Previsão de entrega" />}
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold">{order.customer_name}</p>
+          <p className="text-sm text-gray-600">{fullAddress}</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
+          Em rota
+        </span>
       </div>
+
+      {order.delivery_date_time && (
+        <div className="mb-3">
+          <CountdownTimer target={order.delivery_date_time} label="Previsão de entrega" size="lg" />
+        </div>
+      )}
 
       <div className="mb-3">
         <PaymentBadge category={order.payment_category} value={pendingValue} />
