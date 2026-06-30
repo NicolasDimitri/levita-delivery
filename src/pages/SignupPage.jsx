@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 export default function SignupPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [pixKey, setPixKey] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -38,7 +39,7 @@ export default function SignupPage() {
     if (userId) {
       const { error: profileError } = await supabase
         .from('profiles')
-        .insert({ id: userId, role: 'driver', name, phone });
+        .insert({ id: userId, role: 'driver', name, phone, pix_key: pixKey || null });
 
       if (profileError) {
         setLoading(false);
@@ -81,6 +82,18 @@ export default function SignupPage() {
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              Chave PIX <span className="font-normal text-gray-400">(opcional, dá pra cadastrar depois)</span>
+            </label>
+            <input
+              value={pixKey}
+              onChange={(e) => setPixKey(e.target.value)}
+              placeholder="CPF, e-mail, telefone ou chave aleatória"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
             />
           </div>

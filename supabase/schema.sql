@@ -24,6 +24,7 @@ create table public.profiles (
   role text not null check (role in ('admin', 'driver')),
   name text not null,
   phone text,
+  pix_key text,
   created_at timestamptz not null default now()
 );
 
@@ -141,6 +142,43 @@ create table public.delivery_history (
 create index delivery_history_driver_id_idx on public.delivery_history(driver_id);
 
 -- ============================================================
+-- TABELA: withdrawal_requests
+-- Uma solicitação de saque = "entregador pediu pra receber o saldo
+-- acumulado via PIX". Sempre pega o saldo TOTAL disponível no momento
+-- do pedido (não é possível sacar valor parcial).
+-- ============================================================
+create table public.withdrawal_requests (
+  id uuid primary key default gen_random_uuid(),
+  driver_id uuid not null references public.profiles(id),
+  -- snapshot da chave PIX no momento do pedido — se o entregador trocar
+  -- a chave depois, isso não deve alterar solicitações já feitas
+  pix_key text not null,
+  total_value numeric(10,2) not null default 0,
+  status text not null default 'pendente' check (status in ('pendente', 'pago')),
+  requested_at timestamptz not null default now(),
+  paid_at timestamptz
+);
+
+create index withdrawal_requests_driver_id_idx on public.withdrawal_requests(driver_id);
+create index withdrawal_requests_status_idx on public.withdrawal_requests(status);
+
+-- ============================================================
+-- TABELA: withdrawal_request_items
+-- Liga cada solicitação às linhas específicas de delivery_history que
+-- entraram nela. É isso que permite "zerar" só a parte sacada do saldo:
+-- o saldo disponível de um entregador = soma de delivery_history que
+-- NÃO aparece aqui ainda (ver função public.driver_available_balance).
+-- ============================================================
+create table public.withdrawal_request_items (
+  id uuid primary key default gen_random_uuid(),
+  withdrawal_request_id uuid not null references public.withdrawal_requests(id) on delete cascade,
+  delivery_history_id uuid not null references public.delivery_history(id),
+  unique (delivery_history_id) -- uma entrega só pode entrar em UMA solicitação
+);
+
+create index withdrawal_request_items_request_id_idx on public.withdrawal_request_items(withdrawal_request_id);
+
+-- ============================================================
 -- TABELA: webhook_events
 -- Guarda o ID de cada evento do iFood já processado, pra evitar
 -- processar o mesmo evento duas vezes (o iFood pode reenviar)
@@ -175,6 +213,8 @@ grant select, update on public.orders to authenticated;
 grant select on public.order_items to authenticated;
 grant select on public.order_item_additions to authenticated;
 grant select on public.delivery_history to authenticated;
+grant select, insert, update on public.withdrawal_requests to authenticated;
+grant select on public.withdrawal_request_items to authenticated;
 
 -- o service_role IGNORA as policies de RLS, mas ainda precisa do GRANT de
 -- base na tabela (são duas camadas diferentes — veja o comentário acima).
@@ -189,6 +229,8 @@ grant all on public.order_items to service_role;
 grant all on public.order_item_additions to service_role;
 grant all on public.delivery_history to service_role;
 grant all on public.webhook_events to service_role;
+grant all on public.withdrawal_requests to service_role;
+grant all on public.withdrawal_request_items to service_role;
 
 -- ============================================================
 -- FUNÇÃO AUXILIAR: is_admin()
@@ -207,6 +249,29 @@ as $$
 $$;
 
 -- ============================================================
+-- FUNÇÃO AUXILIAR: driver_available_balance(driver_id)
+-- Soma as entregas concluídas desse entregador que AINDA NÃO entraram
+-- em nenhuma solicitação de saque (não tem linha correspondente em
+-- withdrawal_request_items). É a fonte única de verdade do "saldo
+-- disponível" — tanto a tela do entregador quanto o botão de solicitar
+-- saque usam essa mesma função, pra nunca ficarem com números diferentes.
+-- ============================================================
+create or replace function public.driver_available_balance(p_driver_id uuid)
+returns numeric
+language sql
+security definer
+stable
+as $$
+  select coalesce(sum(dh.valor_entrega), 0)
+  from public.delivery_history dh
+  where dh.driver_id = p_driver_id
+  and not exists (
+    select 1 from public.withdrawal_request_items wri
+    where wri.delivery_history_id = dh.id
+  );
+$$;
+
+-- ============================================================
 -- RLS: ativar em todas as tabelas
 -- ============================================================
 alter table public.profiles enable row level security;
@@ -216,6 +281,8 @@ alter table public.order_items enable row level security;
 alter table public.order_item_additions enable row level security;
 alter table public.delivery_history enable row level security;
 alter table public.webhook_events enable row level security;
+alter table public.withdrawal_requests enable row level security;
+alter table public.withdrawal_request_items enable row level security;
 
 -- ---------- profiles ----------
 -- qualquer usuário autenticado pode ver o próprio perfil (pra saber se é admin ou driver)
@@ -300,13 +367,50 @@ create policy "driver ve seu proprio historico"
   on public.delivery_history for select
   using (driver_id = auth.uid());
 
+-- ---------- withdrawal_requests ----------
+-- a CRIAÇÃO de solicitação passa só pelo endpoint /api/driver/request-withdrawal
+-- (service_role, ignora RLS) — ele recalcula o saldo real no servidor antes
+-- de inserir, pra um driver não conseguir forjar um total_value qualquer
+-- mandando um insert direto com a anon key.
+create policy "admin ve todas as solicitacoes de saque"
+  on public.withdrawal_requests for select
+  using (public.is_admin());
+
+create policy "driver ve suas proprias solicitacoes de saque"
+  on public.withdrawal_requests for select
+  using (driver_id = auth.uid());
+
+-- admin marca como pago (update) direto pelo frontend, com a anon key —
+-- a RLS já restringe isso a quem é admin
+create policy "admin atualiza solicitacoes de saque"
+  on public.withdrawal_requests for update
+  using (public.is_admin())
+  with check (public.is_admin());
+
+-- ---------- withdrawal_request_items ----------
+create policy "admin ve itens de solicitacoes de saque"
+  on public.withdrawal_request_items for select
+  using (public.is_admin());
+
+create policy "driver ve itens das suas proprias solicitacoes"
+  on public.withdrawal_request_items for select
+  using (
+    exists (
+      select 1 from public.withdrawal_requests wr
+      where wr.id = withdrawal_request_items.withdrawal_request_id
+      and wr.driver_id = auth.uid()
+    )
+  );
+
 -- webhook_events: nenhuma policy = bloqueado para todo mundo exceto service_role
 -- (service_role sempre ignora RLS, então não precisa de policy aqui)
 
 -- ============================================================
--- REALTIME: habilita atualização em tempo real na tabela orders
+-- REALTIME: habilita atualização em tempo real nas tabelas que
+-- precisam refletir mudanças na tela sem o usuário recarregar a página
 -- ============================================================
 alter publication supabase_realtime add table public.orders;
+alter publication supabase_realtime add table public.withdrawal_requests;
 
 -- ============================================================
 -- FIM DO SCHEMA

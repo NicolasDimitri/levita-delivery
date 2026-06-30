@@ -12,6 +12,14 @@ export default function DriverPage() {
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  const [pendingWithdrawal, setPendingWithdrawal] = useState(null);
+  const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
+  const [withdrawalError, setWithdrawalError] = useState('');
+
+  const [showPixForm, setShowPixForm] = useState(false);
+  const [pixKey, setPixKey] = useState(profile?.pix_key || '');
+  const [savingPix, setSavingPix] = useState(false);
+
   // Só pedidos despachados pro iFood (em_rota) aparecem pro entregador -
   // antes disso (em_preparo / pronto) o pedido ainda nem saiu da cozinha.
   const loadOrders = useCallback(async () => {
@@ -40,19 +48,32 @@ export default function DriverPage() {
     setFinishedOrders(data || []);
   }, [session]);
 
+  // saldo disponível usa a função SQL driver_available_balance(), que já
+  // exclui qualquer entrega que tenha entrado numa solicitação de saque
+  // anterior — é a mesma lógica usada no backend pra criar a solicitação,
+  // então o número mostrado aqui nunca diverge do que será sacado de fato
   const loadBalance = useCallback(async () => {
-    const { data } = await supabase
-      .from('delivery_history')
-      .select('valor_entrega')
-      .eq('driver_id', session.user.id);
+    const { data } = await supabase.rpc('driver_available_balance', { p_driver_id: session.user.id });
+    setBalance(Number(data) || 0);
+  }, [session]);
 
-    const total = (data || []).reduce((sum, row) => sum + Number(row.valor_entrega), 0);
-    setBalance(total);
+  const loadPendingWithdrawal = useCallback(async () => {
+    const { data } = await supabase
+      .from('withdrawal_requests')
+      .select('*')
+      .eq('driver_id', session.user.id)
+      .eq('status', 'pendente')
+      .order('requested_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    setPendingWithdrawal(data || null);
   }, [session]);
 
   useEffect(() => {
     loadOrders();
     loadBalance();
+    loadPendingWithdrawal();
 
     const channel = supabase
       .channel('driver-orders')
@@ -65,14 +86,58 @@ export default function DriverPage() {
           if (tab === 'finalizadas') loadFinishedOrders();
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'withdrawal_requests', filter: `driver_id=eq.${session.user.id}` },
+        () => {
+          loadBalance();
+          loadPendingWithdrawal();
+        }
+      )
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [loadOrders, loadBalance, loadFinishedOrders, session, tab]);
+  }, [loadOrders, loadBalance, loadFinishedOrders, loadPendingWithdrawal, session, tab]);
 
   useEffect(() => {
     if (tab === 'finalizadas') loadFinishedOrders();
   }, [tab, loadFinishedOrders]);
+
+  async function handleRequestWithdrawal() {
+    setRequestingWithdrawal(true);
+    setWithdrawalError('');
+    try {
+      const token = session.access_token;
+      const res = await fetch('/api/driver/request-withdrawal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao solicitar saque');
+
+      await loadBalance();
+      await loadPendingWithdrawal();
+    } catch (err) {
+      setWithdrawalError(err.message);
+    } finally {
+      setRequestingWithdrawal(false);
+    }
+  }
+
+  async function handleSavePix(e) {
+    e.preventDefault();
+    setSavingPix(true);
+    setWithdrawalError('');
+    try {
+      const { error } = await supabase.from('profiles').update({ pix_key: pixKey }).eq('id', session.user.id);
+      if (error) throw new Error(error.message);
+      setShowPixForm(false);
+    } catch (err) {
+      setWithdrawalError(err.message);
+    } finally {
+      setSavingPix(false);
+    }
+  }
 
   return (
     <div className="min-h-screen p-4">
@@ -90,6 +155,62 @@ export default function DriverPage() {
         <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Saldo de entregas concluídas</p>
           <p className="text-2xl font-semibold text-green-700">R$ {balance.toFixed(2)}</p>
+
+          {withdrawalError && <p className="mt-2 text-sm text-red-600">{withdrawalError}</p>}
+
+          {pendingWithdrawal ? (
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              Saque de R$ {Number(pendingWithdrawal.total_value).toFixed(2)} solicitado em{' '}
+              {new Date(pendingWithdrawal.requested_at).toLocaleDateString('pt-BR')} — aguardando pagamento.
+            </p>
+          ) : (
+            <button
+              onClick={handleRequestWithdrawal}
+              disabled={requestingWithdrawal || balance <= 0}
+              className="mt-3 w-full rounded-lg bg-green-600 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              {requestingWithdrawal ? 'Solicitando...' : 'Solicitar saque via PIX'}
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              setPixKey(profile?.pix_key || '');
+              setShowPixForm((v) => !v);
+            }}
+            className="mt-2 w-full text-center text-xs text-gray-500 hover:text-gray-700 hover:underline"
+          >
+            {profile?.pix_key ? 'Trocar chave PIX' : 'Cadastrar chave PIX'}
+          </button>
+
+          {showPixForm && (
+            <form onSubmit={handleSavePix} className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+              <label className="block text-xs font-medium text-gray-600">Sua chave PIX</label>
+              <input
+                required
+                value={pixKey}
+                onChange={(e) => setPixKey(e.target.value)}
+                placeholder="CPF, e-mail, telefone ou chave aleatória"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPixForm(false)}
+                  className="flex-1 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPix}
+                  className="flex-1 rounded-lg bg-brand-500 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+                >
+                  {savingPix ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
 
         <div className="mb-5 flex gap-2 border-b border-gray-200">
