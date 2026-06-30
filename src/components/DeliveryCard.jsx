@@ -2,7 +2,6 @@
 import { useState } from 'react';
 import PaymentBadge from './PaymentBadge';
 import ConfirmDeliveryModal from './ConfirmDeliveryModal';
-import CountdownTimer from './CountdownTimer';
 
 export default function DeliveryCard({ order, onChanged }) {
   const [copied, setCopied] = useState(false);
@@ -37,7 +36,6 @@ export default function DeliveryCard({ order, onChanged }) {
       <div className="mb-3">
         <p className="font-semibold">{order.customer_name}</p>
         <p className="text-sm text-gray-600">{fullAddress}</p>
-        {order.delivery_date_time && <CountdownTimer target={order.delivery_date_time} label="Previsão de entrega" />}
       </div>
 
       <div className="mb-3">

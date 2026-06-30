@@ -1,7 +1,6 @@
 // src/components/ConfirmDeliveryModal.jsx
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { extractDigitsFromSpeech } from '../lib/extractDigitsFromSpeech';
 
 async function callApi(path, options = {}) {
   const { data: sessionData } = await supabase.auth.getSession();
@@ -27,44 +26,6 @@ export default function ConfirmDeliveryModal({ order, onClose, onConfirmed }) {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [listening, setListening] = useState(false);
-
-  const SpeechRecognitionApi =
-    typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
-
-  function handleMicClick() {
-    if (!SpeechRecognitionApi) {
-      setError('Reconhecimento de voz não é suportado neste navegador.');
-      return;
-    }
-
-    const recognition = new SpeechRecognitionApi();
-    recognition.lang = 'pt-BR';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    setError('');
-    setListening(true);
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      const digits = extractDigitsFromSpeech(transcript);
-      if (digits) {
-        setCode(digits);
-      } else {
-        setError('Não entendi nenhum número. Tente de novo ou digite o código.');
-      }
-    };
-
-    recognition.onerror = () => {
-      setError('Erro ao ouvir o áudio. Tente de novo ou digite o código.');
-    };
-
-    recognition.onend = () => setListening(false);
-
-    recognition.start();
-  }
 
   useEffect(() => {
     callApi(`/api/ifood/order-meta?orderId=${order.id}`, { method: 'GET' })
@@ -119,40 +80,12 @@ export default function ConfirmDeliveryModal({ order, onClose, onConfirmed }) {
 
         <div className="mb-3">
           <label className="mb-1 block text-sm font-medium">Código de confirmação do cliente</label>
-          <div className="flex items-center gap-2">
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={4}
-              placeholder="0000"
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-center text-lg tracking-widest focus:border-brand-500 focus:outline-none"
-            />
-            {SpeechRecognitionApi && (
-              <button
-                type="button"
-                onClick={handleMicClick}
-                disabled={listening}
-                title="Falar o código"
-                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition ${
-                  listening
-                    ? 'animate-pulse border-red-300 bg-red-50 text-red-600'
-                    : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
-                  />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
-                </svg>
-              </button>
-            )}
-          </div>
-          {listening && <p className="mt-1 text-center text-xs text-red-500">Ouvindo... diga os 4 números</p>}
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="Peça o código ao cliente"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+          />
         </div>
 
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}

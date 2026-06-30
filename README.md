@@ -69,26 +69,18 @@ Isso só fica disponível depois de fazer o primeiro deploy (você precisa de um
 2. Cole a URL: `https://SEU-PROJETO.vercel.app/api/ifood/webhook`
 3. Salve
 
-### 2.4 Pegar um token de acesso (app Centralizado usa client_credentials)
+### 2.4 Autorizar suas 3 lojas
+Como é app Centralizado, cada loja precisa autorizar o acesso manualmente (mas como você é o dono das 3, é rápido):
 
-⚠️ Correção importante: o fluxo de `userCode` (autorização manual por loja) é exclusivo de apps **Distribuído**. Como nosso app é **Centralizado**, ele não suporta esse grant type — só `client_credentials`. Não tente usar `/oauth/userCode` com esse client_id, vai dar erro "Grant type not authorized for client".
-
-1. Gere um token:
+1. Gere um código de usuário:
 ```bash
-curl --compressed -X POST "https://merchant-api.ifood.com.br/authentication/v1.0/oauth/token" \
+curl -X POST "https://merchant-api.ifood.com.br/authentication/v1.0/oauth/userCode" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grantType=client_credentials&clientId=SEU_CLIENT_ID&clientSecret=SEU_CLIENT_SECRET"
+  -d "clientId=SEU_CLIENT_ID"
 ```
-
-2. Liste as lojas que já estão liberadas pra esse client_id:
-```bash
-curl --compressed -X GET "https://merchant-api.ifood.com.br/merchant/v1.0/merchants" \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN"
-```
-
-No app de teste, a loja de teste já deve aparecer aqui automaticamente, sem nenhum passo manual de autorização.
-
-Pra vincular as 3 lojas reais ao app de produção (depois da homologação), o caminho provavelmente é direto pelo Portal do Parceiro de cada loja — esse passo específico ainda precisa ser confirmado na hora, quando chegarmos lá.
+2. A resposta traz `verificationUrlComplete` e `userCode`. Abra essa URL no navegador
+3. Faça login no Portal do Parceiro da loja, clique em **Autorizar Aplicativo**
+4. Repita para as outras 2 lojas (logando com o acesso de cada loja, se forem contas diferentes)
 
 ### 2.5 Descobrir o merchantId das suas lojas
 Depois de autorizado, gere um token e liste as lojas:

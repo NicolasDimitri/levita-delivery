@@ -60,9 +60,6 @@ export default async function handler(req, res) {
   // o iFood pode mandar um evento único ou um array de eventos no mesmo POST
   const events = Array.isArray(payload) ? payload : [payload];
 
-  console.log('=== [WEBHOOK] evento(s) recebido(s) do iFood ===');
-  console.log(JSON.stringify(events, null, 2));
-
   for (const event of events) {
     try {
       await processEvent(event);
@@ -112,9 +109,6 @@ async function processEvent(event) {
 async function handlePlaced(event) {
   const order = await getOrderDetails(event.orderId);
 
-  console.log('=== [WEBHOOK] objeto completo do pedido (GET /orders/{id}) ===');
-  console.log(JSON.stringify(order, null, 2));
-
   // pedido pode ainda não estar disponível (404) — nesse caso ignoramos,
   // o evento de confirmação seguinte vai trazer o status atualizado
   if (!order) return;
@@ -152,7 +146,6 @@ async function handlePlaced(event) {
       payment_raw: payments,
       total_value: order.total?.orderAmount ?? 0,
       delivery_fee: order.total?.deliveryFee ?? 0,
-      delivery_date_time: delivery.deliveryDateTime || null,
       status: 'recebido'
     })
     .select()
