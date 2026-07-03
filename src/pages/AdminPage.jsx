@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import OrderCard from '../components/OrderCard';
 import StoreStatusToggle from '../components/StoreStatusToggle';
-import WithdrawalsTab from '../components/WithdrawalsTab';
+import { Link } from 'react-router-dom';
 
 // Colunas visíveis na aba "Ativos", na ordem do fluxo - mesmo modelo do
 // Gestor de Pedidos do iFood (Em preparo / Pronto / Em rota), com a coluna
@@ -18,14 +18,11 @@ const ACTIVE_COLUMNS = [
 
 export default function AdminPage() {
   const { signOut, profile } = useAuth();
-  const [tab, setTab] = useState('ativos'); // 'ativos' | 'finalizados' | 'saques'
+  const [tab, setTab] = useState('ativos'); // 'ativos' | 'finalizados'
   const [orders, setOrders] = useState([]);
   const [finalizedOrders, setFinalizedOrders] = useState([]);
   const [drivers, setDrivers] = useState([]);
-  const [withdrawals, setWithdrawals] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  const pendingWithdrawalsCount = withdrawals.filter((w) => w.status === 'pendente').length;
 
   const loadOrders = useCallback(async () => {
     const { data } = await supabase
@@ -57,29 +54,9 @@ export default function AdminPage() {
     setDrivers(data || []);
   }, []);
 
-  // mostra solicitações pendentes + as últimas 20 pagas, pra ter um
-  // histórico recente sem carregar a tabela inteira
-  const loadWithdrawals = useCallback(async () => {
-    const { data: pendingData } = await supabase
-      .from('withdrawal_requests')
-      .select('*')
-      .eq('status', 'pendente')
-      .order('requested_at', { ascending: true });
-
-    const { data: paidData } = await supabase
-      .from('withdrawal_requests')
-      .select('*')
-      .eq('status', 'pago')
-      .order('paid_at', { ascending: false })
-      .limit(20);
-
-    setWithdrawals([...(pendingData || []), ...(paidData || [])]);
-  }, []);
-
   useEffect(() => {
     loadOrders();
     loadDrivers();
-    loadWithdrawals();
 
     const channel = supabase
       .channel('admin-orders')
@@ -89,13 +66,10 @@ export default function AdminPage() {
         // pedido é concluído, atualiza essa lista também
         if (tab === 'finalizados') loadFinalizedOrders();
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, () => {
-        loadWithdrawals();
-      })
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [loadOrders, loadDrivers, loadFinalizedOrders, loadWithdrawals, tab]);
+  }, [loadOrders, loadDrivers, loadFinalizedOrders, tab]);
 
   useEffect(() => {
     if (tab === 'finalizados') loadFinalizedOrders();
@@ -113,6 +87,12 @@ export default function AdminPage() {
           </div>
           <div className="flex items-center gap-4">
             <StoreStatusToggle />
+            <Link
+              to="/financeiro"
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            >
+              Financeiro
+            </Link>
             <button onClick={signOut} className="text-sm text-gray-500 hover:text-gray-800">
               Sair
             </button>
@@ -135,14 +115,6 @@ export default function AdminPage() {
             }`}
           >
             Finalizados
-          </button>
-          <button
-            onClick={() => setTab('saques')}
-            className={`border-b-2 px-3 py-2 text-sm font-medium ${
-              tab === 'saques' ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500'
-            }`}
-          >
-            Saques {pendingWithdrawalsCount > 0 && `(${pendingWithdrawalsCount})`}
           </button>
         </div>
 
@@ -186,10 +158,6 @@ export default function AdminPage() {
               ))}
             </div>
           </div>
-        )}
-
-        {tab === 'saques' && (
-          <WithdrawalsTab withdrawals={withdrawals} drivers={drivers} onChanged={loadWithdrawals} />
         )}
       </div>
     </div>

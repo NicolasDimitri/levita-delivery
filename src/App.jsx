@@ -4,6 +4,8 @@ import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import AdminPage from './pages/AdminPage';
 import DriverPage from './pages/DriverPage';
+import ExpensesPage from './pages/ExpensesPage';
+import DevBanner from './components/DevBanner';
 
 function PrivateRoute({ role, children }) {
   const { session, profile, loading } = useAuth();
@@ -17,7 +19,6 @@ function PrivateRoute({ role, children }) {
   }
 
   if (role && profile.role !== role) {
-    // entregador tentando ver tela de admin (ou vice-versa) -> manda pra tela certa
     return <Navigate to={profile.role === 'admin' ? '/admin' : '/entregas'} replace />;
   }
 
@@ -33,29 +34,41 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/cadastro" element={<SignupPage />} />
+    <>
+      <DevBanner />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/cadastro" element={<SignupPage />} />
 
-      <Route
-        path="/admin"
-        element={
-          <PrivateRoute role="admin">
-            <AdminPage />
-          </PrivateRoute>
-        }
-      />
+        <Route
+          path="/admin"
+          element={
+            <PrivateRoute role="admin">
+              <AdminPage />
+            </PrivateRoute>
+          }
+        />
 
-      <Route
-        path="/entregas"
-        element={
-          <PrivateRoute role="driver">
-            <DriverPage />
-          </PrivateRoute>
-        }
-      />
+        <Route
+          path="/entregas"
+          element={
+            <PrivateRoute role="driver">
+              <DriverPage />
+            </PrivateRoute>
+          }
+        />
 
-      <Route path="*" element={<HomeRedirect />} />
-    </Routes>
+        <Route
+          path="/financeiro"
+          element={
+            <PrivateRoute role="admin">
+              <ExpensesPage />
+            </PrivateRoute>
+          }
+        />
+
+        <Route path="*" element={<HomeRedirect />} />
+      </Routes>
+    </>
   );
 }

@@ -2,11 +2,6 @@
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
-  "functions": {
-    "api/ifood/*.js": {
-      "maxDuration": 30
-    }
-  },
   "crons": [
     { "path": "/api/ifood/cleanup-webhook-events", "schedule": "0 6 * * *" }
   ]
