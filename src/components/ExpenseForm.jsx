@@ -2,8 +2,9 @@
 import { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { Button, Input, ToggleGroup, SectionLabel, ErrorMsg } from '../lib/ui';
+import { Button, Input, CurrencyInput, AutocompleteInput, ToggleGroup, SectionLabel, ErrorMsg } from '../lib/ui';
 import { EXPENSE_METHODS, CARDS } from '../lib/constants';
+import { useSuggestions } from '../lib/useSuggestions';
 
 const EMPTY = {
   description: '', category: 'pessoal', payment_method: '',
@@ -19,6 +20,9 @@ export default function ExpenseForm({ onSaved }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const descriptionSuggestions = useSuggestions('expenses', 'description');
+  const lenderSuggestions = useSuggestions('expenses', 'lender_name');
+
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const isCard   = CARDS.includes(f.payment_method);
   const isBoleto = f.payment_method === 'boleto';
@@ -29,7 +33,7 @@ export default function ExpenseForm({ onSaved }) {
     e.preventDefault();
     setError('');
     if (!f.payment_method) return setError('Selecione o método de pagamento.');
-    if (!f.description.trim()) return setError('Informe uma descrição.');
+    if (!isLent && !f.description.trim()) return setError('Informe uma descrição.');
     if (Number(f.amount) <= 0) return setError('Informe um valor válido.');
     if (isCard && Number(f.card_installments) < 1) return setError('Informe o número de parcelas.');
     if (isBoleto && f.boleto_type === 'parcelado_semanal' && !f.boleto_weekly_installments)
@@ -40,7 +44,8 @@ export default function ExpenseForm({ onSaved }) {
     setLoading(true);
     const { error: err } = await supabase.from('expenses').insert({
       registered_by: profile.id, registered_by_name: profile.name,
-      description: f.description.trim(), category: f.category,
+      description: isLent ? `Emprestado — ${f.lender_name.trim()}` : f.description.trim(),
+      category: f.category,
       payment_method: f.payment_method, amount: Number(f.amount),
       purchase_date: f.purchase_date,
       card_installments: isCard ? Number(f.card_installments) : null,
@@ -56,9 +61,10 @@ export default function ExpenseForm({ onSaved }) {
     onSaved?.();
   }
 
-  const amountLabel = isLoan ? 'Valor da parcela mensal (R$)'
-    : (isBoleto && f.boleto_type === 'parcelado_semanal') ? 'Valor de cada parcela semanal (R$)'
-    : 'Valor total (R$)';
+  const amountLabel = isLoan ? 'Valor da parcela mensal'
+    : (isBoleto && f.boleto_type === 'parcelado_semanal') ? 'Valor de cada parcela semanal'
+    : isLent ? 'Valor emprestado'
+    : 'Valor total';
 
   return (
     <form onSubmit={submit} className="space-y-5">
@@ -109,15 +115,17 @@ export default function ExpenseForm({ onSaved }) {
       )}
 
       {isLent && (
-        <Input label="Nome de quem emprestou" type="text" required placeholder="Ex: João Silva"
-          value={f.lender_name} onChange={e => set('lender_name', e.target.value)} />
+        <AutocompleteInput label="Nome de quem emprestou" required placeholder="Ex: João Silva"
+          value={f.lender_name} onChange={v => set('lender_name', v)} suggestions={lenderSuggestions} />
       )}
 
-      <Input label="Descrição" type="text" required placeholder="Fornecedor, aluguel, etc."
-        value={f.description} onChange={e => set('description', e.target.value)} />
+      {!isLent && (
+        <AutocompleteInput label="Descrição" required placeholder="Fornecedor, aluguel, etc."
+          value={f.description} onChange={v => set('description', v)} suggestions={descriptionSuggestions} />
+      )}
 
-      <Input label={amountLabel} type="number" min="0.01" step="0.01" required placeholder="0,00"
-        value={f.amount} onChange={e => set('amount', e.target.value)} />
+      <CurrencyInput label={amountLabel} required
+        value={f.amount} onChange={v => set('amount', v)} />
 
       <Input label="Data da compra" type="date" required
         value={f.purchase_date} onChange={e => set('purchase_date', e.target.value)} />

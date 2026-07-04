@@ -3,8 +3,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { TabBar, Button, EmptyState, Badge, Card, SectionLabel } from '../lib/ui';
-import { EXPENSE_METHODS, CARD_INFO, cardDueDates, fmtBRL, fmtDateShort } from '../lib/constants';
+import { TabBar, Button, EmptyState, Card, SectionLabel, Sheet, FloatingActions } from '../lib/ui';
+import {
+  EXPENSE_METHODS, CARD_INFO, CARDS, cardDueDates, fmtBRL, fmtDateShort,
+  cardOwed, lenderOwed,
+} from '../lib/constants';
 import ExpenseForm from '../components/ExpenseForm';
 import ExpenseCard from '../components/ExpenseCard';
 import PaymentForm from '../components/PaymentForm';
@@ -14,8 +17,6 @@ const TABS = [
   { id: 'gastos',     label: 'Gastos'     },
   { id: 'pagamentos', label: 'Pagamentos' },
   { id: 'cartoes',    label: 'Cartões'    },
-  { id: 'novo',       label: '+ Gasto'   },
-  { id: 'pagar',      label: '+ Pago'    },
 ];
 
 const CATS = ['todas', 'pessoal', 'empresarial'];
@@ -29,6 +30,10 @@ export default function ExpensesPage() {
   const [filterCat, setFilterCat] = useState('todas');
   const [filterMethod, setFilterMethod] = useState('');
   const [filterUser, setFilterUser] = useState('');
+
+  // formulários flutuantes
+  const [expenseSheetOpen, setExpenseSheetOpen] = useState(false);
+  const [paymentPreset, setPaymentPreset] = useState(undefined); // undefined = fechado
 
   const loadExpenses = useCallback(async () => {
     let q = supabase.from('expenses').select('*')
@@ -50,8 +55,15 @@ export default function ExpensesPage() {
     setPayments(data || []);
   }, [filterCat, filterUser]);
 
+  // gastos e pagamentos são carregados sempre — cartões e saldos de dívida
+  // dependem dos dois, mesmo em abas diferentes.
   useEffect(() => { loadExpenses(); }, [loadExpenses]);
-  useEffect(() => { if (tab === 'pagamentos') loadPayments(); }, [tab, loadPayments]);
+  useEffect(() => { loadPayments(); }, [loadPayments]);
+
+  function reloadAll() {
+    loadExpenses();
+    loadPayments();
+  }
 
   const allUsers = [...new Set([
     ...expenses.map(e => e.registered_by_name),
@@ -61,6 +73,18 @@ export default function ExpensesPage() {
   const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0);
   const totalPayments = payments.reduce((s, p) => s + Number(p.amount), 0);
   const byCategory = cat => expenses.filter(e => e.category === cat).reduce((s, e) => s + Number(e.amount), 0);
+
+  function openPayCard(cardKey) {
+    setPaymentPreset({ payment_type: 'fatura_cartao', reference: cardKey, category: 'pessoal' });
+  }
+
+  function openPayExpense(e) {
+    if (e.payment_method === 'emprestado') {
+      setPaymentPreset({ payment_type: 'quitacao_emprestado', reference: e.lender_name, category: e.category });
+    } else if (e.payment_method === 'emprestimo') {
+      setPaymentPreset({ payment_type: 'quitacao_emprestimo', reference: e.description, category: e.category });
+    }
+  }
 
   function Filters({ showMethod = false }) {
     return (
@@ -90,7 +114,7 @@ export default function ExpensesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-10">
+    <div className="min-h-screen bg-gray-50 pb-32">
       {/* cabeçalho */}
       <div className="sticky top-0 z-10 border-b border-gray-200 bg-white shadow-sm">
         <div className="mx-auto max-w-2xl px-4 pt-3 pb-0">
@@ -128,7 +152,19 @@ export default function ExpensesPage() {
             <Filters showMethod />
             {loading && <p className="text-sm text-gray-400">Carregando...</p>}
             {!loading && expenses.length === 0 && <EmptyState message="Nenhum gasto registrado ainda." />}
-            <div className="space-y-3">{expenses.map(e => <ExpenseCard key={e.id} expense={e} />)}</div>
+            <div className="space-y-3">
+              {expenses.map(e => {
+                const isDebt = e.payment_method === 'emprestado' || e.payment_method === 'emprestimo';
+                const remaining = e.payment_method === 'emprestado'
+                  ? lenderOwed(e.lender_name, expenses, payments)
+                  : undefined;
+                return (
+                  <ExpenseCard key={e.id} expense={e}
+                    remaining={isDebt ? remaining : undefined}
+                    onPay={isDebt ? openPayExpense : undefined} />
+                );
+              })}
+            </div>
           </>
         )}
 
@@ -154,14 +190,22 @@ export default function ExpensesPage() {
         {/* ── cartões ── */}
         {tab === 'cartoes' && (
           <div className="space-y-3">
-            <SectionLabel>Fechamento e vencimento dos cartões</SectionLabel>
-            {Object.entries(CARD_INFO).map(([key, info]) => {
+            <SectionLabel>Fechamento, vencimento e saldo dos cartões</SectionLabel>
+            {CARDS.map(key => {
+              const info = CARD_INFO[key];
               const d = cardDueDates(key);
               if (!d) return null;
+              const owed = cardOwed(key, expenses, payments);
               return (
                 <Card key={key}>
-                  <p className="mb-3 font-semibold text-gray-800">{info.label}</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <p className="font-semibold text-gray-800">{info.label}</p>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-400 leading-none mb-0.5">A pagar</p>
+                      <p className="text-lg font-bold text-gray-900 leading-none">R$ {fmtBRL(owed)}</p>
+                    </div>
+                  </div>
+                  <div className="mb-3 grid grid-cols-2 gap-3">
                     <div className={`rounded-xl p-3 text-center ${d.daysToClose <= 3 ? 'bg-red-50' : 'bg-gray-50'}`}>
                       <p className="text-xs text-gray-400 mb-0.5">Fecha em</p>
                       <p className="text-sm font-bold text-gray-800">{fmtDateShort(d.closeDate)}</p>
@@ -177,16 +221,35 @@ export default function ExpensesPage() {
                       </p>
                     </div>
                   </div>
+                  <Button variant="success" size="sm" type="button"
+                    disabled={owed <= 0.005} onClick={() => openPayCard(key)}>
+                    💸 Pagar fatura
+                  </Button>
                 </Card>
               );
             })}
             <p className="text-xs text-gray-400 text-center pt-1">Datas ajustadas para o próximo dia útil quando caem em fim de semana.</p>
           </div>
         )}
-
-        {tab === 'novo'  && <ExpenseForm onSaved={() => { loadExpenses(); setTab('gastos');    }} />}
-        {tab === 'pagar' && <PaymentForm onSaved={() => { loadPayments(); setTab('pagamentos'); }} />}
       </div>
+
+      {/* botões flutuantes: + Gasto / Pagar */}
+      <FloatingActions
+        onNewExpense={() => setExpenseSheetOpen(true)}
+        onPay={() => setPaymentPreset(null)}
+      />
+
+      {/* formulário de novo gasto */}
+      <Sheet open={expenseSheetOpen} onClose={() => setExpenseSheetOpen(false)} title="Novo gasto">
+        <ExpenseForm onSaved={() => { reloadAll(); setExpenseSheetOpen(false); setTab('gastos'); }} />
+      </Sheet>
+
+      {/* formulário de pagamento — paymentPreset === null: livre; objeto: pré-preenchido/travado */}
+      <Sheet open={paymentPreset !== undefined} onClose={() => setPaymentPreset(undefined)}
+        title={paymentPreset ? 'Pagar' : 'Novo pagamento'}>
+        <PaymentForm preset={paymentPreset || undefined}
+          onSaved={() => { reloadAll(); setPaymentPreset(undefined); setTab('pagamentos'); }} />
+      </Sheet>
     </div>
   );
 }

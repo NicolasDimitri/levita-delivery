@@ -1,5 +1,5 @@
 // src/components/ExpenseCard.jsx
-import { Badge, Card } from '../lib/ui';
+import { Badge, Card, Button } from '../lib/ui';
 import { EXPENSE_METHOD_MAP, CARDS, fmtBRL, fmtDate } from '../lib/constants';
 
 function detail(e) {
@@ -24,8 +24,17 @@ function detail(e) {
 
 const CAT_COLOR = { pessoal: 'indigo', empresarial: 'emerald' };
 
-export default function ExpenseCard({ expense: e }) {
+/**
+ * `remaining` (opcional): quanto ainda falta pagar/devolver relacionado a
+ * este registro (só faz sentido para 'emprestado' e 'emprestimo'). Quando
+ * informado e maior que zero, mostra o saldo e o botão flutuante "Pagar"
+ * em cima do registro.
+ */
+export default function ExpenseCard({ expense: e, remaining, onPay }) {
   const m = EXPENSE_METHOD_MAP[e.payment_method] ?? { label: e.payment_method, icon: '💰', color: 'gray' };
+  const isDebt = e.payment_method === 'emprestado' || e.payment_method === 'emprestimo';
+  const showPay = isDebt && onPay && (remaining === undefined || remaining > 0.005);
+
   return (
     <Card>
       <div className="mb-2 flex items-start justify-between gap-2">
@@ -34,13 +43,28 @@ export default function ExpenseCard({ expense: e }) {
       </div>
       <p className="mb-1 text-xl font-bold text-gray-900">R$ {fmtBRL(e.amount)}</p>
       <p className="mb-3 text-xs text-gray-500 leading-relaxed">{detail(e)}</p>
-      <div className="flex flex-wrap items-center justify-between gap-1">
+
+      {isDebt && remaining !== undefined && (
+        <p className="mb-3 text-xs font-semibold text-amber-600">
+          {remaining > 0.005 ? `Falta devolver: R$ ${fmtBRL(remaining)}` : 'Quitado ✓'}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Badge color={m.color}>{m.icon} {m.label}</Badge>
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <span>📅 {fmtDate(e.purchase_date)}</span>
           <span>· {e.registered_by_name}</span>
         </div>
       </div>
+
+      {showPay && (
+        <div className="mt-3 border-t border-gray-100 pt-3">
+          <Button variant="success" size="sm" type="button" onClick={() => onPay(e)}>
+            💸 Pagar
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }

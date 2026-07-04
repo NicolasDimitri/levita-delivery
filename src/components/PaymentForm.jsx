@@ -2,8 +2,9 @@
 import { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { Button, Input, ToggleGroup, SectionLabel, ErrorMsg, Card } from '../lib/ui';
-import { PAYMENT_TYPES, CARDS, CARD_INFO, cardDueDates, fmtDateShort } from '../lib/constants';
+import { Button, CurrencyInput, AutocompleteInput, ToggleGroup, SectionLabel, ErrorMsg } from '../lib/ui';
+import { PAYMENT_TYPES, PAYMENT_TYPE_MAP, CARDS, CARD_INFO, cardDueDates, fmtDateShort } from '../lib/constants';
+import { useSuggestions } from '../lib/useSuggestions';
 
 const IS_CARD_TYPE = ['fatura_cartao', 'antecipacao_cartao'];
 const EMPTY = {
@@ -12,12 +13,20 @@ const EMPTY = {
   payment_date: new Date().toISOString().split('T')[0],
 };
 
-export default function PaymentForm({ onSaved }) {
+/**
+ * `preset`, quando informado, trava o tipo de pagamento e a referência
+ * (usado pelo botão "Pagar" de um cartão ou de um registro de empréstimo/
+ * emprestado) — o usuário só precisa informar valor, data e observações.
+ */
+export default function PaymentForm({ onSaved, preset }) {
   const { profile } = useAuth();
-  const [f, setF] = useState(EMPTY);
+  const locked = !!preset;
+  const [f, setF] = useState({ ...EMPTY, ...(preset || {}) });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  const referenceSuggestions = useSuggestions('payments', 'reference');
 
   const isCard = IS_CARD_TYPE.includes(f.payment_type);
   const cardDates = isCard && CARDS.includes(f.reference) ? cardDueDates(f.reference) : null;
@@ -38,55 +47,68 @@ export default function PaymentForm({ onSaved }) {
     });
     setLoading(false);
     if (err) return setError('Erro ao salvar: ' + err.message);
-    setF(EMPTY);
+    setF({ ...EMPTY, ...(preset || {}) });
     onSaved?.();
   }
 
+  const referenceLabel = CARD_INFO[f.reference]?.label ?? f.reference;
+
   return (
     <form onSubmit={submit} className="space-y-5">
-      {/* tipo */}
-      <div>
-        <SectionLabel>Tipo de pagamento</SectionLabel>
-        <div className="space-y-2">
-          {PAYMENT_TYPES.map(t => (
-            <button key={t.value} type="button" onClick={() => set('payment_type', t.value)}
-              className={`flex w-full items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition ${
-                f.payment_type === t.value ? 'border-brand-500 bg-brand-50' : 'border-gray-200 bg-white'
-              }`}>
-              <span className="text-xl">{t.icon}</span>
-              <div>
-                <p className={`text-sm font-semibold ${f.payment_type === t.value ? 'text-brand-700' : 'text-gray-700'}`}>{t.label}</p>
-                <p className="text-xs text-gray-400">{t.desc}</p>
-              </div>
-            </button>
-          ))}
+      {locked ? (
+        <div className="rounded-xl border border-brand-100 bg-brand-50 p-4">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-500">Pagando</p>
+          <p className="text-sm font-bold text-brand-800">
+            {PAYMENT_TYPE_MAP[f.payment_type]?.icon} {PAYMENT_TYPE_MAP[f.payment_type]?.label} — {referenceLabel}
+          </p>
         </div>
-      </div>
-
-      {/* referência */}
-      {f.payment_type && (
-        <div>
-          <SectionLabel>{isCard ? 'Cartão' : 'Referência (o que está sendo pago)'}</SectionLabel>
-          {isCard ? (
-            <div className="grid grid-cols-2 gap-2">
-              {CARDS.map(c => {
-                const d = cardDueDates(c);
-                return (
-                  <button key={c} type="button" onClick={() => set('reference', c)}
-                    className={`rounded-xl border-2 p-3 text-left transition ${
-                      f.reference === c ? 'border-brand-500 bg-brand-50' : 'border-gray-200 bg-white'
-                    }`}>
-                    <p className={`text-sm font-semibold ${f.reference === c ? 'text-brand-700' : 'text-gray-700'}`}>{CARD_INFO[c].label}</p>
-                    {d && <p className="mt-0.5 text-xs text-gray-400">Fecha {fmtDateShort(d.closeDate)} · Vence {fmtDateShort(d.dueDate)}</p>}
-                  </button>
-                );
-              })}
+      ) : (
+        <>
+          {/* tipo */}
+          <div>
+            <SectionLabel>Tipo de pagamento</SectionLabel>
+            <div className="space-y-2">
+              {PAYMENT_TYPES.map(t => (
+                <button key={t.value} type="button" onClick={() => set('payment_type', t.value)}
+                  className={`flex w-full items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition ${
+                    f.payment_type === t.value ? 'border-brand-500 bg-brand-50' : 'border-gray-200 bg-white'
+                  }`}>
+                  <span className="text-xl">{t.icon}</span>
+                  <div>
+                    <p className={`text-sm font-semibold ${f.payment_type === t.value ? 'text-brand-700' : 'text-gray-700'}`}>{t.label}</p>
+                    <p className="text-xs text-gray-400">{t.desc}</p>
+                  </div>
+                </button>
+              ))}
             </div>
-          ) : (
-            <Input type="text" required placeholder="Ex: Boleto Fornecedor X"
-              value={f.reference} onChange={e => set('reference', e.target.value)} />
+          </div>
+
+          {/* referência */}
+          {f.payment_type && (
+            <div>
+              <SectionLabel>{isCard ? 'Cartão' : 'Referência (o que está sendo pago)'}</SectionLabel>
+              {isCard ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {CARDS.map(c => {
+                    const d = cardDueDates(c);
+                    return (
+                      <button key={c} type="button" onClick={() => set('reference', c)}
+                        className={`rounded-xl border-2 p-3 text-left transition ${
+                          f.reference === c ? 'border-brand-500 bg-brand-50' : 'border-gray-200 bg-white'
+                        }`}>
+                        <p className={`text-sm font-semibold ${f.reference === c ? 'text-brand-700' : 'text-gray-700'}`}>{CARD_INFO[c].label}</p>
+                        {d && <p className="mt-0.5 text-xs text-gray-400">Fecha {fmtDateShort(d.closeDate)} · Vence {fmtDateShort(d.dueDate)}</p>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <AutocompleteInput required placeholder="Ex: Boleto Fornecedor X"
+                  value={f.reference} onChange={v => set('reference', v)} suggestions={referenceSuggestions} />
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {/* info datas do cartão */}
@@ -116,8 +138,8 @@ export default function PaymentForm({ onSaved }) {
       )}
 
       {f.payment_type && (
-        <Input label="Valor pago (R$)" type="number" min="0.01" step="0.01" required placeholder="0,00"
-          value={f.amount} onChange={e => set('amount', e.target.value)} />
+        <CurrencyInput label="Valor pago" required
+          value={f.amount} onChange={v => set('amount', v)} />
       )}
 
       {f.payment_type && (
@@ -132,8 +154,11 @@ export default function PaymentForm({ onSaved }) {
       )}
 
       {f.payment_type && (
-        <Input label="Data do pagamento" type="date" required
-          value={f.payment_date} onChange={e => set('payment_date', e.target.value)} />
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">Data do pagamento</label>
+          <input type="date" required value={f.payment_date} onChange={e => set('payment_date', e.target.value)}
+            className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-sm focus:border-brand-500 focus:outline-none" />
+        </div>
       )}
 
       <ErrorMsg message={error} />
