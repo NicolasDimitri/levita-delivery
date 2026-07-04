@@ -1,52 +1,52 @@
 // src/pages/AdminPage.jsx
 import { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { TabBar, Button, EmptyState, Badge, ErrorMsg } from '../lib/ui';
+import { fmtBRL } from '../lib/constants';
 import OrderCard from '../components/OrderCard';
 import StoreStatusToggle from '../components/StoreStatusToggle';
-import { Link } from 'react-router-dom';
 
-// Colunas visíveis na aba "Ativos", na ordem do fluxo - mesmo modelo do
-// Gestor de Pedidos do iFood (Em preparo / Pronto / Em rota), com a coluna
-// extra "Novos pedidos" antes (pedidos que ainda não foram aceitos).
 const ACTIVE_COLUMNS = [
-  { status: 'recebido', title: 'Novos pedidos' },
-  { status: 'em_preparo', title: 'Em preparo' },
-  { status: 'pronto', title: 'Pronto' },
-  { status: 'em_rota', title: 'Em rota' }
+  { status: 'recebido',   title: 'Novos pedidos' },
+  { status: 'em_preparo', title: 'Em preparo'    },
+  { status: 'pronto',     title: 'Pronto'        },
+  { status: 'em_rota',    title: 'Em rota'       },
+];
+
+const TABS = [
+  { id: 'ativos',      label: 'Ativos'      },
+  { id: 'finalizados', label: 'Finalizados' },
+  { id: 'entregadores', label: 'Entregadores' },
 ];
 
 export default function AdminPage() {
   const { signOut, profile } = useAuth();
-  const [tab, setTab] = useState('ativos'); // 'ativos' | 'finalizados'
+  const [tab, setTab] = useState('ativos');
   const [orders, setOrders] = useState([]);
-  const [finalizedOrders, setFinalizedOrders] = useState([]);
+  const [finalOrders, setFinalOrders] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [driverBalances, setDriverBalances] = useState({});
+  const [loadingWithdraw, setLoadingWithdraw] = useState(null);
+  const [withdrawError, setWithdrawError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const loadOrders = useCallback(async () => {
     const { data } = await supabase
-      .from('orders')
-      .select('*, order_items(*, order_item_additions(*))')
-      .neq('status', 'entregue')
-      .neq('status', 'cancelado')
+      .from('orders').select('*, order_items(*, order_item_additions(*))')
+      .not('status', 'in', '("entregue","cancelado")')
       .order('created_at', { ascending: false });
-
     setOrders(data || []);
     setLoading(false);
   }, []);
 
-  // Carregada só quando o admin abre a aba "Finalizados" - não fica presa
-  // no realtime, pra não recarregar uma lista grande a cada evento.
-  const loadFinalizedOrders = useCallback(async () => {
+  const loadFinalOrders = useCallback(async () => {
     const { data } = await supabase
-      .from('orders')
-      .select('*, order_items(*, order_item_additions(*))')
+      .from('orders').select('*, order_items(*, order_item_additions(*))')
       .in('status', ['entregue', 'cancelado'])
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    setFinalizedOrders(data || []);
+      .order('created_at', { ascending: false }).limit(50);
+    setFinalOrders(data || []);
   }, []);
 
   const loadDrivers = useCallback(async () => {
@@ -54,109 +54,139 @@ export default function AdminPage() {
     setDrivers(data || []);
   }, []);
 
-  useEffect(() => {
-    loadOrders();
-    loadDrivers();
+  const loadDriverBalances = useCallback(async () => {
+    if (!drivers.length) return;
+    const ids = drivers.map(d => d.id);
+    const [{ data: hist }, { data: wdr }] = await Promise.all([
+      supabase.from('delivery_history').select('driver_id, valor_entrega').in('driver_id', ids),
+      supabase.from('withdrawals').select('driver_id, valor').in('driver_id', ids),
+    ]);
+    const earned = {};
+    const withdrawn = {};
+    (hist || []).forEach(r => { earned[r.driver_id] = (earned[r.driver_id] || 0) + Number(r.valor_entrega); });
+    (wdr || []).forEach(r => { withdrawn[r.driver_id] = (withdrawn[r.driver_id] || 0) + Number(r.valor); });
+    const balances = {};
+    ids.forEach(id => { balances[id] = Math.max(0, (earned[id] || 0) - (withdrawn[id] || 0)); });
+    setDriverBalances(balances);
+  }, [drivers]);
 
-    const channel = supabase
-      .channel('admin-orders')
+  useEffect(() => { loadOrders(); loadDrivers(); }, [loadOrders, loadDrivers]);
+  useEffect(() => { if (tab === 'finalizados') loadFinalOrders(); }, [tab, loadFinalOrders]);
+  useEffect(() => { if (tab === 'entregadores') loadDriverBalances(); }, [tab, loadDriverBalances]);
+
+  useEffect(() => {
+    const ch = supabase.channel('admin-orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
         loadOrders();
-        // se o admin estiver olhando "Finalizados" no momento em que um
-        // pedido é concluído, atualiza essa lista também
-        if (tab === 'finalizados') loadFinalizedOrders();
-      })
-      .subscribe();
+        if (tab === 'finalizados') loadFinalOrders();
+      }).subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [loadOrders, loadFinalOrders, tab]);
 
-    return () => supabase.removeChannel(channel);
-  }, [loadOrders, loadDrivers, loadFinalizedOrders, tab]);
-
-  useEffect(() => {
-    if (tab === 'finalizados') loadFinalizedOrders();
-  }, [tab, loadFinalizedOrders]);
-
-  const totalAtivos = orders.length;
+  async function registerWithdrawal(driver) {
+    const balance = driverBalances[driver.id] || 0;
+    if (balance <= 0) return;
+    setLoadingWithdraw(driver.id);
+    setWithdrawError('');
+    const { error } = await supabase.from('withdrawals').insert({
+      driver_id: driver.id,
+      valor: balance,
+      paid_at: new Date().toISOString(),
+      paid_by: profile.id,
+    });
+    setLoadingWithdraw(null);
+    if (error) { setWithdrawError(error.message); return; }
+    await loadDriverBalances();
+  }
 
   return (
-    <div className="min-h-screen p-4 md:p-6">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold">Pedidos</h1>
-            <p className="text-sm text-gray-500">Olá, {profile?.name}</p>
+    <div className="min-h-screen bg-gray-50 pb-10">
+      {/* cabeçalho */}
+      <div className="sticky top-0 z-10 border-b border-gray-200 bg-white shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 pt-3 pb-0">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-bold text-gray-800">Pedidos</p>
+              <p className="text-xs text-gray-400">Olá, {profile?.name}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <StoreStatusToggle />
+              <Link to="/financeiro" className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Financeiro</Link>
+              <Button variant="ghost" onClick={signOut}>Sair</Button>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <StoreStatusToggle />
-            <Link
-              to="/financeiro"
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-            >
-              Financeiro
-            </Link>
-            <button onClick={signOut} className="text-sm text-gray-500 hover:text-gray-800">
-              Sair
-            </button>
-          </div>
+          <TabBar tabs={TABS} active={tab} onChange={setTab} />
         </div>
+      </div>
 
-        <div className="mb-5 flex gap-2 border-b border-gray-200">
-          <button
-            onClick={() => setTab('ativos')}
-            className={`border-b-2 px-3 py-2 text-sm font-medium ${
-              tab === 'ativos' ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500'
-            }`}
-          >
-            Ativos {totalAtivos > 0 && `(${totalAtivos})`}
-          </button>
-          <button
-            onClick={() => setTab('finalizados')}
-            className={`border-b-2 px-3 py-2 text-sm font-medium ${
-              tab === 'finalizados' ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500'
-            }`}
-          >
-            Finalizados
-          </button>
-        </div>
-
-        {loading && tab === 'ativos' && <p className="text-gray-500">Carregando pedidos...</p>}
-
-        {tab === 'ativos' && !loading && (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {ACTIVE_COLUMNS.map((col) => {
-              const columnOrders = orders.filter((o) => o.status === col.status);
-              return (
-                <div key={col.status} className="rounded-xl bg-gray-100 p-3">
-                  <p className="mb-3 px-1 text-sm font-semibold text-gray-600">
-                    {col.title} <span className="text-gray-400">({columnOrders.length})</span>
-                  </p>
-                  <div className="space-y-3">
-                    {columnOrders.length === 0 && (
-                      <p className="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-center text-xs text-gray-400">
-                        Nenhum pedido aqui
+      <div className="mx-auto max-w-7xl px-4 pt-5">
+        {/* ativos */}
+        {tab === 'ativos' && (
+          loading
+            ? <p className="text-sm text-gray-400">Carregando...</p>
+            : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {ACTIVE_COLUMNS.map(col => {
+                  const colOrders = orders.filter(o => o.status === col.status);
+                  return (
+                    <div key={col.status} className="rounded-2xl bg-gray-100 p-3">
+                      <p className="mb-3 px-1 text-xs font-bold uppercase tracking-wide text-gray-500">
+                        {col.title} <span className="text-gray-400">({colOrders.length})</span>
                       </p>
-                    )}
-                    {columnOrders.map((order) => (
-                      <OrderCard key={order.id} order={order} drivers={drivers} onChanged={loadOrders} />
-                    ))}
+                      {colOrders.length === 0
+                        ? <EmptyState message="Nenhum pedido aqui" />
+                        : <div className="space-y-3">
+                            {colOrders.map(o => <OrderCard key={o.id} order={o} drivers={drivers} onChanged={loadOrders} />)}
+                          </div>
+                      }
+                    </div>
+                  );
+                })}
+              </div>
+        )}
+
+        {/* finalizados */}
+        {tab === 'finalizados' && (
+          finalOrders.length === 0
+            ? <EmptyState message="Nenhum pedido finalizado ainda." />
+            : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {finalOrders.map(o => <OrderCard key={o.id} order={o} drivers={drivers} onChanged={loadFinalOrders} />)}
+              </div>
+        )}
+
+        {/* entregadores + saques */}
+        {tab === 'entregadores' && (
+          <div className="max-w-lg space-y-3">
+            <ErrorMsg message={withdrawError} />
+            {drivers.length === 0 && <EmptyState message="Nenhum entregador cadastrado." />}
+            {drivers.map(driver => {
+              const balance = driverBalances[driver.id] ?? 0;
+              const isPaying = loadingWithdraw === driver.id;
+              return (
+                <div key={driver.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-semibold text-gray-800">{driver.name}</p>
+                      <p className="text-xs text-gray-400">{driver.phone || 'Sem telefone'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-400">Saldo a pagar</p>
+                      <p className={`text-lg font-bold ${balance > 0 ? 'text-green-700' : 'text-gray-400'}`}>
+                        R$ {fmtBRL(balance)}
+                      </p>
+                    </div>
                   </div>
+                  {balance > 0 && (
+                    <Button variant="success" size="lg" className="mt-3 w-full"
+                      onClick={() => registerWithdrawal(driver)} disabled={isPaying}>
+                      {isPaying ? 'Registrando...' : `Marcar R$ ${fmtBRL(balance)} como pago`}
+                    </Button>
+                  )}
+                  {balance === 0 && (
+                    <p className="mt-2 text-center text-xs text-gray-400">Saldo zerado ✓</p>
+                  )}
                 </div>
               );
             })}
-          </div>
-        )}
-
-        {tab === 'finalizados' && (
-          <div>
-            {finalizedOrders.length === 0 && (
-              <p className="rounded-xl border border-dashed border-gray-300 p-8 text-center text-gray-400">
-                Nenhum pedido finalizado ainda.
-              </p>
-            )}
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {finalizedOrders.map((order) => (
-                <OrderCard key={order.id} order={order} drivers={drivers} onChanged={loadFinalizedOrders} />
-              ))}
-            </div>
           </div>
         )}
       </div>
