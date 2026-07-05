@@ -35,7 +35,7 @@ export default function AdminPage() {
   const loadOrders = useCallback(async () => {
     const { data } = await supabase
       .from('orders').select('*, order_items(*, order_item_additions(*))')
-      .not('status', 'in', '("entregue","cancelado")')
+      .neq('status', 'entregue').neq('status', 'cancelado')
       .order('created_at', { ascending: false });
     setOrders(data || []);
     setLoading(false);
@@ -72,7 +72,10 @@ export default function AdminPage() {
 
   useEffect(() => { loadOrders(); loadDrivers(); }, [loadOrders, loadDrivers]);
   useEffect(() => { if (tab === 'finalizados') loadFinalOrders(); }, [tab, loadFinalOrders]);
-  useEffect(() => { if (tab === 'entregadores') loadDriverBalances(); }, [tab, loadDriverBalances]);
+  // loadDriverBalances depende de drivers, então roda quando: (1) aba abre, (2) drivers carrega
+  useEffect(() => {
+    if (tab === 'entregadores' && drivers.length > 0) loadDriverBalances();
+  }, [tab, drivers, loadDriverBalances]);
 
   useEffect(() => {
     const ch = supabase.channel('admin-orders')
