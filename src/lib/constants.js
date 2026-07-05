@@ -91,3 +91,42 @@ export function cardDueDates(cardKey) {
 export function fmtDateShort(date) {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
+
+// ── Máscara de valor monetário (input) ───────────────────────────────────
+/** Converte uma quantidade em centavos (inteiro) para string "12.334,88" */
+export function centsToBRLString(cents) {
+  const reais = Math.floor(cents / 100);
+  const centStr = String(cents % 100).padStart(2, '0');
+  return reais.toLocaleString('pt-BR') + ',' + centStr;
+}
+
+/** Total de uma despesa considerando parcelas (cartão/boleto semanal/empréstimo) */
+export function expenseTotal(e) {
+  if (CARDS.includes(e.payment_method)) return Number(e.amount) * Number(e.card_installments || 1);
+  if (e.payment_method === 'boleto' && e.boleto_type === 'parcelado_semanal')
+    return Number(e.amount) * Number(e.boleto_weekly_installments || 1);
+  if (e.payment_method === 'emprestimo') return Number(e.amount) * Number(e.loan_installments || 1);
+  return Number(e.amount);
+}
+
+/** Quanto ainda deve ser pago em um cartão: soma dos gastos (com parcelas) - soma dos pagamentos feitos nele */
+export function cardOwed(cardKey, expenses, payments) {
+  const gastos = expenses
+    .filter(e => e.payment_method === cardKey)
+    .reduce((s, e) => s + expenseTotal(e), 0);
+  const pagos = payments
+    .filter(p => ['fatura_cartao', 'antecipacao_cartao'].includes(p.payment_type) && p.reference === cardKey)
+    .reduce((s, p) => s + Number(p.amount), 0);
+  return Math.max(0, gastos - pagos);
+}
+
+/** Quanto ainda falta devolver a quem emprestou dinheiro (por nome) */
+export function lenderOwed(lenderName, expenses, payments) {
+  const emprestado = expenses
+    .filter(e => e.payment_method === 'emprestado' && e.lender_name === lenderName)
+    .reduce((s, e) => s + Number(e.amount), 0);
+  const devolvido = payments
+    .filter(p => p.payment_type === 'quitacao_emprestado' && p.reference === lenderName)
+    .reduce((s, p) => s + Number(p.amount), 0);
+  return Math.max(0, emprestado - devolvido);
+}

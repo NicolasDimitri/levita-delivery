@@ -2,24 +2,26 @@
 import { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { Button, Input, ToggleGroup, SectionLabel, ErrorMsg } from '../lib/ui';
+import { Button, Input, CurrencyInput, AutocompleteInput, ToggleGroup, SectionLabel, ErrorMsg } from '../lib/ui';
 import { EXPENSE_METHODS, CARDS } from '../lib/constants';
-import CurrencyInput from './CurrencyInput';
-import AutocompleteInput from './AutocompleteInput';
+import { useSuggestions } from '../lib/useSuggestions';
 
 const EMPTY = {
   description: '', category: 'pessoal', payment_method: '',
-  amount: 0, card_installments: '1',
+  amount: '', card_installments: '1',
   boleto_type: 'avista', boleto_weekly_installments: '',
   loan_installments: '', lender_name: '',
   purchase_date: new Date().toISOString().split('T')[0],
 };
 
-export default function ExpenseForm({ onSaved, onCancel }) {
+export default function ExpenseForm({ onSaved }) {
   const { profile } = useAuth();
   const [f, setF] = useState(EMPTY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const descriptionSuggestions = useSuggestions('expenses', 'description');
+  const lenderSuggestions = useSuggestions('expenses', 'lender_name');
 
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const isCard   = CARDS.includes(f.payment_method);
@@ -32,20 +34,19 @@ export default function ExpenseForm({ onSaved, onCancel }) {
     setError('');
     if (!f.payment_method) return setError('Selecione o método de pagamento.');
     if (!isLent && !f.description.trim()) return setError('Informe uma descrição.');
-    if (isLent && !f.lender_name.trim()) return setError('Informe o nome de quem emprestou.');
-    if (f.amount <= 0) return setError('Informe um valor válido.');
+    if (Number(f.amount) <= 0) return setError('Informe um valor válido.');
     if (isCard && Number(f.card_installments) < 1) return setError('Informe o número de parcelas.');
     if (isBoleto && f.boleto_type === 'parcelado_semanal' && !f.boleto_weekly_installments)
       return setError('Informe o número de parcelas semanais.');
     if (isLoan && Number(f.loan_installments) < 1) return setError('Informe as parcelas do empréstimo.');
+    if (isLent && !f.lender_name.trim()) return setError('Informe o nome de quem emprestou.');
 
     setLoading(true);
     const { error: err } = await supabase.from('expenses').insert({
       registered_by: profile.id, registered_by_name: profile.name,
-      // emprestado usa lender_name como descrição para manter consistência no banco
-      description: isLent ? f.lender_name.trim() : f.description.trim(),
+      description: isLent ? `Emprestado — ${f.lender_name.trim()}` : f.description.trim(),
       category: f.category,
-      payment_method: f.payment_method, amount: f.amount,
+      payment_method: f.payment_method, amount: Number(f.amount),
       purchase_date: f.purchase_date,
       card_installments: isCard ? Number(f.card_installments) : null,
       boleto_type: isBoleto ? f.boleto_type : null,
@@ -62,6 +63,7 @@ export default function ExpenseForm({ onSaved, onCancel }) {
 
   const amountLabel = isLoan ? 'Valor da parcela mensal'
     : (isBoleto && f.boleto_type === 'parcelado_semanal') ? 'Valor de cada parcela semanal'
+    : isLent ? 'Valor emprestado'
     : 'Valor total';
 
   return (
@@ -97,13 +99,12 @@ export default function ExpenseForm({ onSaved, onCancel }) {
         <div className="space-y-3">
           <SectionLabel>Tipo de boleto</SectionLabel>
           <ToggleGroup value={f.boleto_type} onChange={v => set('boleto_type', v)} options={[
-            { value: 'avista',            label: 'À vista',  sub: 'vence em 14 dias' },
-            { value: 'parcelado_semanal', label: 'Semanal',  sub: '1ª em 7 dias'      },
+            { value: 'avista',           label: 'À vista',  sub: 'vence em 14 dias' },
+            { value: 'parcelado_semanal', label: 'Semanal', sub: '1ª em 7 dias'      },
           ]} />
           {f.boleto_type === 'parcelado_semanal' && (
             <Input label="Número de semanas" type="number" min="1" max="52" required
-              value={f.boleto_weekly_installments}
-              onChange={e => set('boleto_weekly_installments', e.target.value)} />
+              value={f.boleto_weekly_installments} onChange={e => set('boleto_weekly_installments', e.target.value)} />
           )}
         </div>
       )}
@@ -113,53 +114,27 @@ export default function ExpenseForm({ onSaved, onCancel }) {
           value={f.loan_installments} onChange={e => set('loan_installments', e.target.value)} />
       )}
 
-      {/* emprestado: só o nome de quem emprestou (com autocomplete do histórico) */}
       {isLent && (
-        <AutocompleteInput
-          table="expenses" column="lender_name"
-          label="Nome de quem emprestou"
-          placeholder="Ex: João Silva"
-          required
-          value={f.lender_name}
-          onChange={v => set('lender_name', v)}
-        />
+        <AutocompleteInput label="Nome de quem emprestou" required placeholder="Ex: João Silva"
+          value={f.lender_name} onChange={v => set('lender_name', v)} suggestions={lenderSuggestions} />
       )}
 
-      {/* descrição com autocomplete para todos os outros métodos */}
       {!isLent && (
-        <AutocompleteInput
-          table="expenses" column="description"
-          label="Descrição"
-          placeholder="Fornecedor, aluguel, etc."
-          required
-          value={f.description}
-          onChange={v => set('description', v)}
-        />
+        <AutocompleteInput label="Descrição" required placeholder="Fornecedor, aluguel, etc."
+          value={f.description} onChange={v => set('description', v)} suggestions={descriptionSuggestions} />
       )}
 
-      <CurrencyInput label={amountLabel} value={f.amount} onChange={v => set('amount', v)} required />
+      <CurrencyInput label={amountLabel} required
+        value={f.amount} onChange={v => set('amount', v)} />
 
       <Input label="Data da compra" type="date" required
         value={f.purchase_date} onChange={e => set('purchase_date', e.target.value)} />
 
       <ErrorMsg message={error} />
-
-      <div className="flex gap-2">
-        {onCancel && (
-          <Button variant="ghost" type="button" onClick={onCancel} className="flex-1">
-            Cancelar
-          </Button>
-        )}
-        <Button variant="primary" size="lg" type="submit"
-          disabled={loading || !f.payment_method}
-          className={onCancel ? 'flex-1' : 'w-full'}>
-          {loading ? 'Salvando...' : 'Registrar gasto'}
-        </Button>
-      </div>
-
-      <p className="text-center text-xs text-gray-400">
-        Registrando como <strong>{profile?.name}</strong>
-      </p>
+      <Button variant="primary" size="lg" type="submit" disabled={loading || !f.payment_method}>
+        {loading ? 'Salvando...' : 'Registrar gasto'}
+      </Button>
+      <p className="text-center text-xs text-gray-400">Registrando como <strong>{profile?.name}</strong></p>
     </form>
   );
 }
