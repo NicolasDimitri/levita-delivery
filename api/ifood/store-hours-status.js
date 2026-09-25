@@ -48,12 +48,22 @@ export default async function handler(req, res) {
 
   for (const merchantId of merchantIds) {
     try {
-      const shifts = await getOpeningHours(merchantId);
       const interruptions = await getInterruptions(merchantId);
-      console.log(`=== [API /api/ifood/store-hours-status] shifts da loja ${merchantId} ===`);
-      console.log(JSON.stringify(shifts, null, 2));
       const hasActiveInterruption = interruptions.some((interruption) => isInterruptionActive(interruption));
-      const open = isOpeningHoursOpen(shifts) && !hasActiveInterruption;
+
+      // Uma interrupção ativa já é suficiente para considerar a loja fechada.
+      // Além de ser a fonte mais direta, isso evita que uma falha transitória
+      // no endpoint de horários faça o botão oscilar para um estado incorreto.
+      if (hasActiveInterruption) {
+        stores.push({ merchantId, open: false });
+        continue;
+      }
+
+      const shifts = await getOpeningHours(merchantId);
+      console.log(`=== [API /api/ifood/store-hours-status] shifts atuais da loja ${merchantId} ===`, {
+        count: shifts.length
+      });
+      const open = isOpeningHoursOpen(shifts);
       stores.push({ merchantId, open });
     } catch (err) {
       console.error(`=== [API /api/ifood/store-hours-status] ERRO ao buscar horários da loja ${merchantId} ===`);
