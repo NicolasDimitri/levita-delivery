@@ -2,6 +2,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 
+const STATUS_POLL_INTERVAL_MS = 1500;
+const STATUS_POLL_TIMEOUT_MS = 30_000;
+
 async function callApi(path, options = {}) {
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
@@ -14,6 +17,29 @@ async function callApi(path, options = {}) {
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Erro na requisição');
   return json;
+}
+
+async function waitForStoreStatus(expectedOpen) {
+  const deadline = Date.now() + STATUS_POLL_TIMEOUT_MS;
+  let lastError = null;
+
+  while (Date.now() < deadline) {
+    try {
+      const result = await callApi('/api/ifood/store-hours-status', { method: 'GET' });
+      if (result.allOpen === expectedOpen) {
+        return result.allOpen;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));
+  }
+
+  if (lastError) throw lastError;
+  throw new Error(
+    `O iFood ainda não confirmou a loja como ${expectedOpen ? 'aberta' : 'fechada'}. Tente atualizar novamente.`
+  );
 }
 
 export default function StoreStatusToggle() {
@@ -40,7 +66,8 @@ export default function StoreStatusToggle() {
     const action = open ? 'close' : 'open';
     try {
       await callApi('/api/ifood/toggle-store-hours', { method: 'POST', body: JSON.stringify({ action }) });
-      await loadStatus();
+      const confirmedOpen = await waitForStoreStatus(action === 'open');
+      setOpen(confirmedOpen);
     } catch (err) {
       setError(err.message);
     } finally {
