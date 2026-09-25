@@ -73,7 +73,14 @@ export default async function handler(req, res) {
       } else {
         for (const interruption of manualInterruptions) {
           if (interruption.id && isInterruptionActive(interruption)) {
-            await deleteInterruption(merchantId, interruption.id);
+            try {
+              await deleteInterruption(merchantId, interruption.id);
+            } catch (err) {
+              if (err.code === 'RecentlyCreatedInterruption') {
+                throw new Error('O iFood bloqueia a reabertura por alguns segundos após o fechamento. Aguarde e tente novamente.');
+              }
+              throw err;
+            }
           }
         }
       }
