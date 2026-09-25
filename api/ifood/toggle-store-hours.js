@@ -6,14 +6,14 @@
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import {
-  getOpeningHours,
-  setOpeningHours,
   getTodayDayOfWeek,
-  getCurrentSaoPauloTimeStart,
-  isOpeningHoursOpen
+  getInterruptions,
+  createInterruption,
+  deleteInterruption,
+  isInterruptionActive
 } from '../../lib/ifood.js';
 
-const HORARIO_DURACAO_MINUTOS = 360; // 09:00 às 15:00 = 6 horas
+const MANUAL_INTERRUPTION_DESCRIPTION = 'Levita Delivery - fechamento manual';
 
 export default async function handler(req, res) {
   console.log('=== [API /api/ifood/toggle-store-hours] REQUISIÇÃO RECEBIDA ===', {
@@ -60,36 +60,25 @@ export default async function handler(req, res) {
 
   for (const merchantId of merchantIds) {
     try {
-      const currentShifts = await getOpeningHours(merchantId);
-      console.log(`=== [API /api/ifood/toggle-store-hours] shifts atuais da loja ${merchantId} ===`);
-      console.log(JSON.stringify(currentShifts, null, 2));
+      const interruptions = await getInterruptions(merchantId);
+      const manualInterruptions = interruptions.filter(
+        (interruption) => interruption.description === MANUAL_INTERRUPTION_DESCRIPTION
+      );
 
-      // remove qualquer turno de hoje que já exista (pra não duplicar ao abrir)
-      const shiftsSemHoje = currentShifts
-        .filter((s) => s.dayOfWeek !== today)
-        .map((s) => ({ dayOfWeek: s.dayOfWeek, start: s.start, duration: s.duration }));
-
-      const novosShifts =
-        action === 'open'
-          ? [...shiftsSemHoje, {
-              dayOfWeek: today,
-              start: getCurrentSaoPauloTimeStart(),
-              duration: HORARIO_DURACAO_MINUTOS
-            }]
-          : shiftsSemHoje;
-
-      console.log(`=== [API /api/ifood/toggle-store-hours] novos shifts a enviar (loja ${merchantId}) ===`);
-      console.log(JSON.stringify(novosShifts, null, 2));
-
-      await setOpeningHours(merchantId, novosShifts);
-      const updatedShifts = await getOpeningHours(merchantId);
-      const open = isOpeningHoursOpen(updatedShifts);
-
-      if (open !== (action === 'open')) {
-        throw new Error(`iFood não confirmou a loja como ${action === 'open' ? 'aberta' : 'fechada'}`);
+      if (action === 'close') {
+        const alreadyClosed = manualInterruptions.some((interruption) => isInterruptionActive(interruption));
+        if (!alreadyClosed) {
+          await createInterruption(merchantId, MANUAL_INTERRUPTION_DESCRIPTION);
+        }
+      } else {
+        for (const interruption of manualInterruptions) {
+          if (interruption.id && isInterruptionActive(interruption)) {
+            await deleteInterruption(merchantId, interruption.id);
+          }
+        }
       }
 
-      results.push({ merchantId, ok: true, open });
+      results.push({ merchantId, ok: true, open: action === 'open' });
     } catch (err) {
       console.error(`=== [API /api/ifood/toggle-store-hours] ERRO ao ${action === 'open' ? 'abrir' : 'fechar'} loja ${merchantId} ===`);
       console.error(err);

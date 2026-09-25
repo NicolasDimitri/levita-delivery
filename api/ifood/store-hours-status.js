@@ -4,7 +4,13 @@
 // "Fechado" (vermelho) na tela de admin.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-import { getOpeningHours, getTodayDayOfWeek, isOpeningHoursOpen } from '../../lib/ifood.js';
+import {
+  getOpeningHours,
+  getTodayDayOfWeek,
+  getInterruptions,
+  isOpeningHoursOpen,
+  isInterruptionActive
+} from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
   console.log('=== [API /api/ifood/store-hours-status] REQUISIÇÃO RECEBIDA ===', {
@@ -43,9 +49,11 @@ export default async function handler(req, res) {
   for (const merchantId of merchantIds) {
     try {
       const shifts = await getOpeningHours(merchantId);
+      const interruptions = await getInterruptions(merchantId);
       console.log(`=== [API /api/ifood/store-hours-status] shifts da loja ${merchantId} ===`);
       console.log(JSON.stringify(shifts, null, 2));
-      const open = isOpeningHoursOpen(shifts);
+      const hasActiveInterruption = interruptions.some((interruption) => isInterruptionActive(interruption));
+      const open = isOpeningHoursOpen(shifts) && !hasActiveInterruption;
       stores.push({ merchantId, open });
     } catch (err) {
       console.error(`=== [API /api/ifood/store-hours-status] ERRO ao buscar horários da loja ${merchantId} ===`);
