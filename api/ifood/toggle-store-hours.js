@@ -5,9 +5,13 @@
 // de horários, mantendo os outros dias da semana intactos.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-import { getOpeningHours, setOpeningHours, getTodayDayOfWeek } from '../../lib/ifood.js';
+import {
+  getOpeningHours,
+  setOpeningHours,
+  getTodayDayOfWeek,
+  getCurrentSaoPauloTimeStart
+} from '../../lib/ifood.js';
 
-const HORARIO_INICIO = '09:00:00';
 const HORARIO_DURACAO_MINUTOS = 360; // 09:00 às 15:00 = 6 horas
 
 export default async function handler(req, res) {
@@ -66,14 +70,18 @@ export default async function handler(req, res) {
 
       const novosShifts =
         action === 'open'
-          ? [...shiftsSemHoje, { dayOfWeek: today, start: HORARIO_INICIO, duration: HORARIO_DURACAO_MINUTOS }]
+          ? [...shiftsSemHoje, {
+              dayOfWeek: today,
+              start: getCurrentSaoPauloTimeStart(),
+              duration: HORARIO_DURACAO_MINUTOS
+            }]
           : shiftsSemHoje;
 
       console.log(`=== [API /api/ifood/toggle-store-hours] novos shifts a enviar (loja ${merchantId}) ===`);
       console.log(JSON.stringify(novosShifts, null, 2));
 
       await setOpeningHours(merchantId, novosShifts);
-      results.push({ merchantId, ok: true });
+      results.push({ merchantId, ok: true, open: action === 'open' });
     } catch (err) {
       console.error(`=== [API /api/ifood/toggle-store-hours] ERRO ao ${action === 'open' ? 'abrir' : 'fechar'} loja ${merchantId} ===`);
       console.error(err);
