@@ -9,7 +9,8 @@ import {
   getOpeningHours,
   setOpeningHours,
   getTodayDayOfWeek,
-  getCurrentSaoPauloTimeStart
+  getCurrentSaoPauloTimeStart,
+  isOpeningHoursOpen
 } from '../../lib/ifood.js';
 
 const HORARIO_DURACAO_MINUTOS = 360; // 09:00 às 15:00 = 6 horas
@@ -81,7 +82,14 @@ export default async function handler(req, res) {
       console.log(JSON.stringify(novosShifts, null, 2));
 
       await setOpeningHours(merchantId, novosShifts);
-      results.push({ merchantId, ok: true, open: action === 'open' });
+      const updatedShifts = await getOpeningHours(merchantId);
+      const open = isOpeningHoursOpen(updatedShifts);
+
+      if (open !== (action === 'open')) {
+        throw new Error(`iFood não confirmou a loja como ${action === 'open' ? 'aberta' : 'fechada'}`);
+      }
+
+      results.push({ merchantId, ok: true, open });
     } catch (err) {
       console.error(`=== [API /api/ifood/toggle-store-hours] ERRO ao ${action === 'open' ? 'abrir' : 'fechar'} loja ${merchantId} ===`);
       console.error(err);
