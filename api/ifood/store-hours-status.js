@@ -50,11 +50,14 @@ export default async function handler(req, res) {
     try {
       const interruptions = await getInterruptions(merchantId);
       const hasActiveInterruption = interruptions.some((interruption) => isInterruptionActive(interruption));
+      const hasManualInterruption = interruptions.some(
+        (interruption) => interruption.description === 'Levita Delivery - fechamento manual'
+      );
 
       // Uma interrupção ativa já é suficiente para considerar a loja fechada.
       // Além de ser a fonte mais direta, isso evita que uma falha transitória
       // no endpoint de horários faça o botão oscilar para um estado incorreto.
-      if (hasActiveInterruption) {
+      if (hasActiveInterruption || hasManualInterruption) {
         stores.push({ merchantId, open: false });
         continue;
       }
