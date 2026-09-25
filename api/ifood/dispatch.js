@@ -9,15 +9,12 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { dispatchOrder } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
-  console.log('=== [API /api/ifood/dispatch] REQUISIÇÃO RECEBIDA ===');
-  console.log(JSON.stringify({
+  console.log('=== [API /api/ifood/dispatch] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
-    headers: req.headers,
-    query: req.query,
-    body: req.body,
-    cookies: req.cookies
-  }, null, 2));
+    hasAuth: Boolean(req.headers.authorization),
+    query: req.query
+  });
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -28,7 +25,6 @@ export default async function handler(req, res) {
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
     console.log('=== [API /api/ifood/dispatch] FALHA NA AUTENTICAÇÃO ===');
-    console.log(JSON.stringify({ userError, userData }, null, 2));
     return res.status(401).json({ error: 'Não autenticado' });
   }
 
@@ -52,12 +48,13 @@ export default async function handler(req, res) {
 
   try {
     const ifoodRes = await dispatchOrder(order.ifood_order_id);
-    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (dispatchOrder) ===');
-    console.log(JSON.stringify({ status: ifoodRes.status, ok: ifoodRes.ok, headers: Object.fromEntries(ifoodRes.headers.entries()) }, null, 2));
+    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (dispatchOrder) ===', {
+      status: ifoodRes.status,
+      ok: ifoodRes.ok
+    });
     if (!ifoodRes.ok) {
       const text = await ifoodRes.text();
-      console.log('=== [API /api/ifood/dispatch] CORPO DE ERRO DO IFOOD ===');
-      console.log(text);
+      console.log('=== [API /api/ifood/dispatch] CORPO DE ERRO DO IFOOD ===', { length: text.length });
       return res.status(502).json({ error: `iFood recusou o despacho: ${text}` });
     }
   } catch (err) {
