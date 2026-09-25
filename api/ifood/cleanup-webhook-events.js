@@ -1,19 +1,21 @@
 // api/ifood/cleanup-webhook-events.js
-// A tabela webhook_events só existe pra dedupe (evitar processar o mesmo
-// evento 2x se o iFood reenviar). O iFood não reenvia depois de várias
-// horas, então não há motivo pra guardar essas linhas pra sempre — sem
+// A tabela webhook_events s? existe pra dedupe (evitar processar o mesmo
+// evento 2x se o iFood reenviar). O iFood n?o reenvia depois de v?rias
+// horas, ent?o n?o h? motivo pra guardar essas linhas pra sempre ? sem
 // limpeza, a tabela cresceria sem limite. Esse endpoint apaga tudo com
-// mais de 48h, e é chamado automaticamente 1x por dia (veja vercel.json).
+// mais de 48h, e ? chamado automaticamente 1x por dia (veja vercel.json).
 //
-// Protegido por um header simples (CRON_SECRET) pra ninguém de fora
-// conseguir disparar isso manualmente e tentar limpar o histórico de dedupe.
+// Protegido por um header simples (CRON_SECRET) pra ningu?m de fora
+// conseguir disparar isso manualmente e tentar limpar o hist?rico de dedupe.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 
 export default async function handler(req, res) {
+  const cronSecret = process.env.CRON_SECRET;
   const auth = req.headers.authorization || '';
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ error: 'Não autorizado' });
+
+  if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: 'N?o autorizado' });
   }
 
   const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();

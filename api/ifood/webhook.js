@@ -38,13 +38,12 @@ function isValidSignature(rawBody, signatureHeader) {
 }
 
 export default async function handler(req, res) {
-  console.log('=== [API /api/ifood/webhook] REQUISIÇÃO RECEBIDA ===');
-  console.log(JSON.stringify({
+  console.log('=== [API /api/ifood/webhook] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
-    headers: req.headers,
-    query: req.query
-  }, null, 2));
+    query: req.query,
+    hasSignature: Boolean(req.headers['x-ifood-signature'])
+  });
 
   if (req.method !== 'POST') {
     return res.status(405).send('Method not allowed');
@@ -52,9 +51,6 @@ export default async function handler(req, res) {
 
   const rawBody = await readRawBody(req);
   const signature = req.headers['x-ifood-signature'];
-
-  console.log('=== [API /api/ifood/webhook] RAW BODY (string) ===');
-  console.log(rawBody.toString('utf8'));
 
   if (!isValidSignature(rawBody, signature)) {
     console.warn('Webhook com assinatura inválida recebido');
@@ -71,8 +67,7 @@ export default async function handler(req, res) {
   // o iFood pode mandar um evento único ou um array de eventos no mesmo POST
   const events = Array.isArray(payload) ? payload : [payload];
 
-  console.log('=== [WEBHOOK] evento(s) recebido(s) do iFood ===');
-  console.log(JSON.stringify(events, null, 2));
+  console.log('=== [WEBHOOK] evento(s) recebido(s) do iFood ===', { count: events.length });
 
   for (const event of events) {
     try {
@@ -123,8 +118,7 @@ async function processEvent(event) {
 async function handlePlaced(event) {
   const order = await getOrderDetails(event.orderId);
 
-  console.log('=== [WEBHOOK] objeto completo do pedido (GET /orders/{id}) ===');
-  console.log(JSON.stringify(order, null, 2));
+  console.log('=== [WEBHOOK] pedido carregado do iFood ===', { orderId: order?.id, displayId: order?.displayId });
 
   // pedido pode ainda não estar disponível (404) — nesse caso ignoramos,
   // o evento de confirmação seguinte vai trazer o status atualizado

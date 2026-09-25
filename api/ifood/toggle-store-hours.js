@@ -5,21 +5,22 @@
 // de horários, mantendo os outros dias da semana intactos.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-import { getOpeningHours, setOpeningHours, getTodayDayOfWeek } from '../../lib/ifood.js';
+import {
+  getOpeningHours,
+  setOpeningHours,
+  getTodayDayOfWeek,
+  getCurrentSaoPauloTimeStart
+} from '../../lib/ifood.js';
 
-const HORARIO_INICIO = '09:00:00';
 const HORARIO_DURACAO_MINUTOS = 360; // 09:00 às 15:00 = 6 horas
 
 export default async function handler(req, res) {
-  console.log('=== [API /api/ifood/toggle-store-hours] REQUISIÇÃO RECEBIDA ===');
-  console.log(JSON.stringify({
+  console.log('=== [API /api/ifood/toggle-store-hours] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
-    headers: req.headers,
-    query: req.query,
-    body: req.body,
-    cookies: req.cookies
-  }, null, 2));
+    hasAuth: Boolean(req.headers.authorization),
+    query: req.query
+  });
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -30,7 +31,6 @@ export default async function handler(req, res) {
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
     console.log('=== [API /api/ifood/toggle-store-hours] FALHA NA AUTENTICAÇÃO ===');
-    console.log(JSON.stringify({ userError, userData }, null, 2));
     return res.status(401).json({ error: 'Não autenticado' });
   }
 
@@ -70,14 +70,18 @@ export default async function handler(req, res) {
 
       const novosShifts =
         action === 'open'
-          ? [...shiftsSemHoje, { dayOfWeek: today, start: HORARIO_INICIO, duration: HORARIO_DURACAO_MINUTOS }]
+          ? [...shiftsSemHoje, {
+              dayOfWeek: today,
+              start: getCurrentSaoPauloTimeStart(),
+              duration: HORARIO_DURACAO_MINUTOS
+            }]
           : shiftsSemHoje;
 
       console.log(`=== [API /api/ifood/toggle-store-hours] novos shifts a enviar (loja ${merchantId}) ===`);
       console.log(JSON.stringify(novosShifts, null, 2));
 
       await setOpeningHours(merchantId, novosShifts);
-      results.push({ merchantId, ok: true });
+      results.push({ merchantId, ok: true, open: action === 'open' });
     } catch (err) {
       console.error(`=== [API /api/ifood/toggle-store-hours] ERRO ao ${action === 'open' ? 'abrir' : 'fechar'} loja ${merchantId} ===`);
       console.error(err);
@@ -86,7 +90,6 @@ export default async function handler(req, res) {
   }
 
   const allOk = results.every((r) => r.ok);
-  console.log('=== [API /api/ifood/toggle-store-hours] SUCESSO — respondendo ===');
-  console.log(JSON.stringify({ action, today, results, allOk }, null, 2));
+  console.log('=== [API /api/ifood/toggle-store-hours] SUCESSO — respondendo ===', { action, today, allOk, resultCount: results.length });
   return res.status(allOk ? 200 : 207).json({ action, today, results });
 }

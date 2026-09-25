@@ -8,15 +8,12 @@
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 
 export default async function handler(req, res) {
-  console.log('=== [API /api/driver/request-withdrawal] REQUISIÇÃO RECEBIDA ===');
-  console.log(JSON.stringify({
+  console.log('=== [API /api/driver/request-withdrawal] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
-    headers: req.headers,
-    query: req.query,
-    body: req.body,
-    cookies: req.cookies
-  }, null, 2));
+    hasAuth: Boolean(req.headers.authorization),
+    query: req.query
+  });
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -27,7 +24,6 @@ export default async function handler(req, res) {
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
     console.log('=== [API /api/driver/request-withdrawal] FALHA NA AUTENTICAÇÃO ===');
-    console.log(JSON.stringify({ userError, userData }, null, 2));
     return res.status(401).json({ error: 'Não autenticado' });
   }
   const driverId = userData.user.id;
@@ -83,8 +79,11 @@ export default async function handler(req, res) {
   const availableRows = (history || []).filter((row) => !withdrawnIds.has(row.id));
   const totalValue = availableRows.reduce((sum, row) => sum + Number(row.valor_entrega), 0);
 
-  console.log('=== [API /api/driver/request-withdrawal] saldo calculado ===');
-  console.log(JSON.stringify({ driverId, totalValue, qtdEntregas: availableRows.length }, null, 2));
+  console.log('=== [API /api/driver/request-withdrawal] saldo calculado ===', {
+    driverId,
+    totalValue,
+    qtdEntregas: availableRows.length
+  });
 
   if (availableRows.length === 0 || totalValue <= 0) {
     return res.status(400).json({ error: 'Não há saldo disponível para sacar' });

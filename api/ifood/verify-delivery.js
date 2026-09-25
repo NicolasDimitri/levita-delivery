@@ -13,15 +13,12 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { verifyDeliveryCode } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
-  console.log('=== [API /api/ifood/verify-delivery] REQUISIÇÃO RECEBIDA ===');
-  console.log(JSON.stringify({
+  console.log('=== [API /api/ifood/verify-delivery] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
-    headers: req.headers,
-    query: req.query,
-    body: req.body,
-    cookies: req.cookies
-  }, null, 2));
+    hasAuth: Boolean(req.headers.authorization),
+    query: req.query
+  });
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -33,15 +30,18 @@ export default async function handler(req, res) {
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
     console.log('=== [API /api/ifood/verify-delivery] FALHA NA AUTENTICAÇÃO ===');
-    console.log(JSON.stringify({ userError, userData }, null, 2));
     return res.status(401).json({ error: 'Não autenticado' });
   }
   const requesterId = userData.user.id;
 
   const { orderId, code, useStoredCode } = req.body || {};
 
-  console.log('=== [VERIFY-DELIVERY] requisição recebida do app do entregador ===');
-  console.log(JSON.stringify({ orderId, code, useStoredCode, requesterId }, null, 2));
+  console.log('=== [VERIFY-DELIVERY] requisição recebida do app do entregador ===', {
+    orderId,
+    hasCode: Boolean(code),
+    useStoredCode,
+    requesterId
+  });
 
   if (!orderId) {
     return res.status(400).json({ error: 'orderId é obrigatório' });
@@ -54,13 +54,11 @@ export default async function handler(req, res) {
     .single();
 
   if (orderError || !order) {
-    console.log('=== [API /api/ifood/verify-delivery] PEDIDO NÃO ENCONTRADO ===');
-    console.log(JSON.stringify({ orderId, orderError }, null, 2));
+    console.log('=== [API /api/ifood/verify-delivery] PEDIDO NÃO ENCONTRADO ===', { orderId, orderError: Boolean(orderError) });
     return res.status(404).json({ error: 'Pedido não encontrado' });
   }
 
-  console.log('=== [API /api/ifood/verify-delivery] PEDIDO ENCONTRADO NO SUPABASE ===');
-  console.log(JSON.stringify(order, null, 2));
+    console.log('=== [API /api/ifood/verify-delivery] PEDIDO ENCONTRADO NO SUPABASE ===', { orderId, status: order.status });
 
   // só o entregador responsável ou um admin pode confirmar essa entrega
   if (order.driver_id !== requesterId) {
@@ -97,8 +95,7 @@ export default async function handler(req, res) {
   let result;
   try {
     result = await verifyDeliveryCode(order.ifood_order_id, codeToUse);
-    console.log('=== [VERIFY-DELIVERY] resposta do iFood (verifyDeliveryCode) ===');
-    console.log(JSON.stringify(result, null, 2));
+    console.log('=== [VERIFY-DELIVERY] resposta do iFood (verifyDeliveryCode) ===', { valid: Boolean(result?.valid) });
   } catch (err) {
     console.error('=== [VERIFY-DELIVERY] erro retornado pelo iFood ===');
     console.error(err.message);

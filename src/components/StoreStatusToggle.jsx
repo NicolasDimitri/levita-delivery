@@ -40,7 +40,7 @@ export default function StoreStatusToggle() {
     const action = open ? 'close' : 'open';
     try {
       await callApi('/api/ifood/toggle-store-hours', { method: 'POST', body: JSON.stringify({ action }) });
-      setOpen(action === 'open');
+      await loadStatus();
     } catch (err) {
       setError(err.message);
     } finally {
