@@ -24,6 +24,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   const authHeader = req.headers.authorization || '';
   const jwt = authHeader.replace('Bearer ', '');
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
