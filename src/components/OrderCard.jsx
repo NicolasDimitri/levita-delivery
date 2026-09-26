@@ -8,6 +8,10 @@ import { ORDER_STATUS, fmtBRL, fmtDate } from '../lib/constants';
 
 export { ORDER_STATUS };
 
+function getCancellationCode(reason) {
+  return reason.cancellationCode ?? reason.code ?? reason.id ?? '';
+}
+
 export default function OrderCard({ order, drivers, onChanged }) {
   const { call } = useApi();
   const [loadingKey, setLoadingKey] = useState(null);
@@ -34,11 +38,10 @@ export default function OrderCard({ order, drivers, onChanged }) {
   });
   const cancelOrder = () => {
     const selected = cancellationReasons.find((reason) => {
-      const code = reason.cancellationCode || reason.code || reason.id;
-      return String(code) === selectedCancellation;
+      return String(getCancellationCode(reason)) === selectedCancellation;
     });
     if (!selected) return setError('Selecione um motivo de cancelamento.');
-    const code = selected.cancellationCode || selected.code || selected.id;
+    const code = getCancellationCode(selected);
     const text = selected.description || selected.reason || selected.name || String(code);
     return run('cancel', () => call('/api/ifood/cancel', {
       body: { orderId: order.id, reason: text, cancellationCode: String(code) }
@@ -121,13 +124,16 @@ export default function OrderCard({ order, drivers, onChanged }) {
             </Button>
           ) : (
             <div className="space-y-2">
-              <select value={selectedCancellation} onChange={e => setSelectedCancellation(e.target.value)}
+              <select value={selectedCancellation} onChange={e => {
+                setSelectedCancellation(e.target.value);
+                setError('');
+              }}
                 className="w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none">
                 <option value="">Selecione o motivo no iFood</option>
-                {cancellationReasons.map(reason => {
-                  const code = reason.cancellationCode || reason.code || reason.id;
+                {cancellationReasons.map((reason, index) => {
+                  const code = getCancellationCode(reason);
                   const text = reason.description || reason.reason || reason.name || code;
-                  return <option key={code} value={code}>{code} - {text}</option>;
+                  return <option key={`${code}-${index}`} value={String(code)}>{code} - {text}</option>;
                 })}
               </select>
               <Button variant="danger" size="lg" onClick={cancelOrder} disabled={loading('cancel')}>
