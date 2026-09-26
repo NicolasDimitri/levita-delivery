@@ -12,6 +12,8 @@ export default function OrderCard({ order, drivers, onChanged }) {
   const { call } = useApi();
   const [loadingKey, setLoadingKey] = useState(null);
   const [selectedDriver, setSelectedDriver] = useState(order.driver_id || '');
+  const [cancellationReasons, setCancellationReasons] = useState([]);
+  const [selectedCancellation, setSelectedCancellation] = useState('');
   const [error, setError] = useState('');
 
   const status = ORDER_STATUS[order.status] ?? ORDER_STATUS.recebido;
@@ -26,6 +28,22 @@ export default function OrderCard({ order, drivers, onChanged }) {
 
   const accept   = () => run('accept',  () => call('/api/ifood/confirm',  { body: { orderId: order.id } }));
   const dispatch = () => run('dispatch', () => call('/api/ifood/dispatch', { body: { orderId: order.id } }));
+  const loadCancellationReasons = () => run('reasons', async () => {
+    const result = await call(`/api/ifood/cancel-reasons?orderId=${encodeURIComponent(order.id)}`, { method: 'GET' });
+    setCancellationReasons(result.reasons || []);
+  });
+  const cancelOrder = () => {
+    const selected = cancellationReasons.find((reason) => {
+      const code = reason.cancellationCode || reason.code || reason.id;
+      return String(code) === selectedCancellation;
+    });
+    if (!selected) return setError('Selecione um motivo de cancelamento.');
+    const code = selected.cancellationCode || selected.code || selected.id;
+    const text = selected.description || selected.reason || selected.name || String(code);
+    return run('cancel', () => call('/api/ifood/cancel', {
+      body: { orderId: order.id, reason: text, cancellationCode: String(code) }
+    }));
+  };
 
   const markReady = () => run('ready', async () => {
     const { error: e } = await supabase.from('orders').update({ status: 'pronto' }).eq('id', order.id);
@@ -90,10 +108,34 @@ export default function OrderCard({ order, drivers, onChanged }) {
       <ErrorMsg message={error} />
 
       {/* ações por status */}
-      {order.status === 'recebido' && (
-        <Button variant="primary" size="lg" onClick={accept} disabled={loading('accept')}>
-          {loading('accept') ? 'Aceitando...' : 'Aceitar pedido'}
-        </Button>
+      {['recebido', 'em_preparo', 'pronto'].includes(order.status) && (
+        <div className="space-y-2">
+          {order.status === 'recebido' && (
+            <Button variant="primary" size="lg" onClick={accept} disabled={loading('accept')}>
+              {loading('accept') ? 'Aceitando...' : 'Aceitar pedido'}
+            </Button>
+          )}
+          {cancellationReasons.length === 0 ? (
+            <Button variant="danger" size="lg" onClick={loadCancellationReasons} disabled={loading('reasons')}>
+              {loading('reasons') ? 'Consultando motivos...' : 'Cancelar pedido'}
+            </Button>
+          ) : (
+            <div className="space-y-2">
+              <select value={selectedCancellation} onChange={e => setSelectedCancellation(e.target.value)}
+                className="w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none">
+                <option value="">Selecione o motivo no iFood</option>
+                {cancellationReasons.map(reason => {
+                  const code = reason.cancellationCode || reason.code || reason.id;
+                  const text = reason.description || reason.reason || reason.name || code;
+                  return <option key={code} value={code}>{code} - {text}</option>;
+                })}
+              </select>
+              <Button variant="danger" size="lg" onClick={cancelOrder} disabled={loading('cancel')}>
+                {loading('cancel') ? 'Cancelando...' : 'Confirmar cancelamento'}
+              </Button>
+            </div>
+          )}
+        </div>
       )}
 
       {order.status === 'em_preparo' && (
