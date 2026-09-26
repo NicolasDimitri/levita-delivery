@@ -39,12 +39,16 @@ export default function DeliveryCard({ order, onChanged }) {
           <p className="font-semibold">{order.customer_name}</p>
           <p className="text-sm text-gray-600">{fullAddress}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
-          Em rota
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
+          order.status === 'em_rota'
+            ? 'bg-blue-100 text-blue-700'
+            : 'bg-amber-100 text-amber-700'
+        }`}>
+          {order.status === 'em_rota' ? 'Em rota' : 'Aguardando despacho'}
         </span>
       </div>
 
-      {order.delivery_date_time && (
+      {order.status === 'em_rota' && order.delivery_date_time && (
         <div className="mb-3">
           <CountdownTimer target={order.delivery_date_time} label="Previsão de entrega" size="lg" />
         </div>
@@ -62,7 +66,7 @@ export default function DeliveryCard({ order, onChanged }) {
         ))}
       </ul>
 
-      <div className="flex gap-2">
+      {order.status === 'em_rota' && <div className="flex gap-2">
         <button
           onClick={handleCopyAddress}
           className="flex-1 rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -75,7 +79,7 @@ export default function DeliveryCard({ order, onChanged }) {
         >
           Confirmar entrega
         </button>
-      </div>
+      </div>}
 
       {showModal && (
         <ConfirmDeliveryModal

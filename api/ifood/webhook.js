@@ -69,32 +69,30 @@ export default async function handler(req, res) {
 
   console.log('=== [WEBHOOK] evento(s) recebido(s) do iFood ===', { count: events.length });
 
+  let processingFailed = false;
   for (const event of events) {
     try {
       await processEvent(event);
     } catch (err) {
-      // não interrompe o processamento dos outros eventos do lote
+      processingFailed = true;
       console.error('Erro ao processar evento', event?.id, event?.code, err);
     }
   }
 
-  // responde rápido com 202, como recomendado pela doc do iFood
-  return res.status(202).send();
+  return res.status(processingFailed ? 500 : 202).send();
 }
 
 async function processEvent(event) {
   if (!event?.id) return;
 
-  // dedupe — o iFood pode reenviar o mesmo evento
-  const { data: already } = await supabaseAdmin
+  const { data: already, error: lookupError } = await supabaseAdmin
     .from('webhook_events')
     .select('id')
     .eq('id', event.id)
     .maybeSingle();
 
+  if (lookupError) throw lookupError;
   if (already) return;
-
-  await supabaseAdmin.from('webhook_events').insert({ id: event.id });
 
   switch (event.code) {
     case 'PLC':
@@ -102,6 +100,7 @@ async function processEvent(event) {
       await handlePlaced(event);
       break;
     case 'CONC':
+    case 'CON':
     case 'CONCLUDED':
       await handleConcluded(event);
       break;
@@ -113,16 +112,27 @@ async function processEvent(event) {
       // outros eventos (CFM/CONFIRMED, DSP/DISPATCHED, etc.) não usados no MVP
       break;
   }
+
+  const { error: insertError } = await supabaseAdmin
+    .from('webhook_events')
+    .insert({ id: event.id });
+  if (insertError && insertError.code !== '23505') throw insertError;
 }
 
 async function handlePlaced(event) {
+  const { data: existingOrder, error: existingOrderError } = await supabaseAdmin
+    .from('orders')
+    .select('id')
+    .eq('ifood_order_id', event.orderId)
+    .maybeSingle();
+  if (existingOrderError) throw existingOrderError;
+  if (existingOrder) return;
+
   const order = await getOrderDetails(event.orderId);
 
   console.log('=== [WEBHOOK] pedido carregado do iFood ===', { orderId: order?.id, displayId: order?.displayId });
 
-  // pedido pode ainda não estar disponível (404) — nesse caso ignoramos,
-  // o evento de confirmação seguinte vai trazer o status atualizado
-  if (!order) return;
+  if (!order) throw new Error(`Pedido ${event.orderId} ainda não está disponível no iFood`);
 
   const payments = order.payment || order.payments;
   const paymentCategory = classifyPayment(payments);
@@ -132,12 +142,13 @@ async function handlePlaced(event) {
   const address = delivery.deliveryAddress || {};
 
   if (customer.id) {
-    await supabaseAdmin
+    const { error: customerError } = await supabaseAdmin
       .from('clientes')
       .upsert(
         { ifood_customer_id: customer.id, nome: customer.name },
         { onConflict: 'ifood_customer_id', ignoreDuplicates: false }
       );
+    if (customerError) throw customerError;
   }
 
   const { data: insertedOrder, error } = await supabaseAdmin
@@ -164,8 +175,9 @@ async function handlePlaced(event) {
     .single();
 
   if (error) {
+    if (error.code === '23505') return;
     console.error('Erro ao inserir pedido', error);
-    return;
+    throw error;
   }
 
   // NOTA: os nomes de campo abaixo (item.options, item.unitPrice) seguem o formato
@@ -200,13 +212,70 @@ async function handlePlaced(event) {
 }
 
 async function handleConcluded(event) {
-  await supabaseAdmin
+  const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .update({ status: 'entregue', delivered_at: new Date().toISOString() })
+    .select('id, status, driver_id, delivery_fee')
     .eq('ifood_order_id', event.orderId)
-    .neq('status', 'entregue');
+    .maybeSingle();
+  if (orderError) throw orderError;
+  if (!order) throw new Error(`Pedido ${event.orderId} não encontrado para conclusão`);
+  if (order.status === 'cancelado') return;
+
+  if (order.status !== 'entregue') {
+    const { data: updatedOrder, error: updateError } = await supabaseAdmin
+      .from('orders')
+      .update({ status: 'entregue', delivered_at: new Date().toISOString() })
+      .eq('id', order.id)
+      .neq('status', 'cancelado')
+      .select('id')
+      .maybeSingle();
+    if (updateError) throw updateError;
+    if (!updatedOrder) {
+      const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
+        .from('orders')
+        .select('status')
+        .eq('id', order.id)
+        .single();
+      if (latestOrderError) throw latestOrderError;
+      if (latestOrder.status === 'cancelado') return;
+      if (latestOrder.status !== 'entregue') throw new Error('Não foi possível atualizar o status concluído');
+    }
+  }
+
+  if (order.driver_id) {
+    const { data: history, error: historyLookupError } = await supabaseAdmin
+      .from('delivery_history')
+      .select('id')
+      .eq('order_id', order.id)
+      .limit(1)
+      .maybeSingle();
+    if (historyLookupError) throw historyLookupError;
+
+    if (!history) {
+      const { error: historyInsertError } = await supabaseAdmin.from('delivery_history').insert({
+        driver_id: order.driver_id,
+        order_id: order.id,
+        valor_entrega: order.delivery_fee
+      });
+      if (historyInsertError) throw historyInsertError;
+    }
+  }
 }
 
 async function handleCancelled(event) {
-  await supabaseAdmin.from('orders').update({ status: 'cancelado' }).eq('ifood_order_id', event.orderId);
+  const { data: order, error: orderError } = await supabaseAdmin
+    .from('orders')
+    .select('id, status')
+    .eq('ifood_order_id', event.orderId)
+    .maybeSingle();
+  if (orderError) throw orderError;
+  if (!order) throw new Error(`Pedido ${event.orderId} não encontrado para cancelamento`);
+  if (order.status === 'entregue') return;
+
+  const { error: updateError } = await supabaseAdmin
+    .from('orders')
+    .update({ status: 'cancelado' })
+    .eq('id', order.id)
+    .neq('status', 'entregue');
+  if (updateError) throw updateError;
 }
