@@ -23,7 +23,14 @@ export default async function handler(req, res) {
   }
 
   const { orderId, reason, cancellationCode } = req.body || {};
-  if (!orderId || !reason || !cancellationCode) {
+  if (
+    !orderId ||
+    typeof reason !== 'string' ||
+    !reason.trim() ||
+    cancellationCode === undefined ||
+    cancellationCode === null ||
+    String(cancellationCode).trim() === ''
+  ) {
     return res.status(400).json({ error: 'orderId, reason e cancellationCode são obrigatórios' });
   }
 
