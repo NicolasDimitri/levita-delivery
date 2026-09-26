@@ -6,7 +6,7 @@ export const ORDER_STATUS = {
   em_preparo: { label: 'Em preparo',  color: 'amber'  },
   pronto:     { label: 'Pronto',      color: 'purple' },
   em_rota:    { label: 'Em rota',     color: 'blue'   },
-  entregue:   { label: 'Entregue',    color: 'green'  },
+  entregue:   { label: 'Concluído',  color: 'green'  },
   cancelado:  { label: 'Cancelado',   color: 'red'    },
 };
 
