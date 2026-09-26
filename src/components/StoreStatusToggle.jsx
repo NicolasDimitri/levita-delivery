@@ -8,9 +8,14 @@ const STATUS_POLL_TIMEOUT_MS = 30_000;
 async function callApi(path, options = {}) {
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
+  const method = options.method || 'POST';
+  const requestPath = method === 'GET'
+    ? `${path}${path.includes('?') ? '&' : '?'}_ts=${Date.now()}`
+    : path;
 
-  const res = await fetch(path, {
+  const res = await fetch(requestPath, {
     ...options,
+    cache: method === 'GET' ? 'no-store' : options.cache,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers }
   });
 
