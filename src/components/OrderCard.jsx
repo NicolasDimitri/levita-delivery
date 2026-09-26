@@ -9,7 +9,7 @@ import { ORDER_STATUS, fmtBRL, fmtDate } from '../lib/constants';
 export { ORDER_STATUS };
 
 function getCancellationCode(reason) {
-  return reason.cancellationCode ?? reason.code ?? reason.id ?? '';
+  return reason.cancelCodeId ?? reason.cancellationCode ?? reason.code ?? reason.id ?? '';
 }
 
 export default function OrderCard({ order, drivers, onChanged }) {
