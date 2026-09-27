@@ -1,8 +1,8 @@
 // api/ifood/dispatch.js
-// Avisa o iFood que o pedido saiu para entrega (deliveredBy: MERCHANT).
+// Informa ao iFood que o pedido está pronto para retirada pelo entregador.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-import { dispatchOrder } from '../../lib/ifood.js';
+import { readyToPickupOrder } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
   console.log('=== [API /api/ifood/dispatch] REQUISIÇÃO RECEBIDA ===', {
@@ -62,8 +62,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const ifoodRes = await dispatchOrder(order.ifood_order_id);
-    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (dispatchOrder) ===', {
+    const ifoodRes = await readyToPickupOrder(order.ifood_order_id);
+    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (readyToPickup) ===', {
       status: ifoodRes.status,
       ok: ifoodRes.ok
     });
