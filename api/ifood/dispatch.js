@@ -1,12 +1,8 @@
 // api/ifood/dispatch.js
-// Avisa o iFood que o pedido saiu pra entrega (deliveredBy: MERCHANT).
-// Essa ação é INDEPENDENTE de atribuir um entregador — o admin pode fazer
-// uma, a outra, ou as duas, em qualquer ordem. Atribuir entregador é feito
-// direto pelo frontend (supabase.from('orders').update(...)), sem passar
-// por essa função, já que não precisa chamar a API do iFood pra isso.
+// Informa ao iFood que o pedido está pronto para retirada pelo entregador.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-import { dispatchOrder } from '../../lib/ifood.js';
+import { readyToPickupOrder } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
   console.log('=== [API /api/ifood/dispatch] REQUISIÇÃO RECEBIDA ===', {
@@ -43,12 +39,31 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'orderId é obrigatório' });
   }
 
-  const { data: order } = await supabaseAdmin.from('orders').select('*').eq('id', orderId).single();
-  if (!order) return res.status(404).json({ error: 'Pedido não encontrado' });
+  const { data: order, error: orderError } = await supabaseAdmin
+    .from('orders')
+    .select('id, ifood_order_id, status, driver_id')
+    .eq('id', orderId)
+    .single();
+  if (orderError || !order) return res.status(404).json({ error: 'Pedido não encontrado' });
+  if (order.status !== 'pronto') {
+    return res.status(409).json({ error: 'O pedido precisa estar pronto antes do despacho' });
+  }
+  if (!order.driver_id) {
+    return res.status(400).json({ error: 'Atribua um entregador antes de despachar o pedido' });
+  }
+  const { data: assignedDriver, error: assignedDriverError } = await supabaseAdmin
+    .from('profiles')
+    .select('id')
+    .eq('id', order.driver_id)
+    .eq('role', 'driver')
+    .single();
+  if (assignedDriverError || !assignedDriver) {
+    return res.status(409).json({ error: 'O pedido não está atribuído a um entregador válido' });
+  }
 
   try {
-    const ifoodRes = await dispatchOrder(order.ifood_order_id);
-    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (dispatchOrder) ===', {
+    const ifoodRes = await readyToPickupOrder(order.ifood_order_id);
+    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (readyToPickup) ===', {
       status: ifoodRes.status,
       ok: ifoodRes.ok
     });
@@ -63,13 +78,20 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Erro ao despachar pedido no iFood' });
   }
 
-  const { error: updateError } = await supabaseAdmin
+  const { data: updatedOrder, error: updateError } = await supabaseAdmin
     .from('orders')
     .update({ ifood_dispatched_at: new Date().toISOString(), status: 'em_rota' })
-    .eq('id', order.id);
+    .eq('id', order.id)
+    .eq('status', 'pronto')
+    .eq('driver_id', order.driver_id)
+    .select('id')
+    .maybeSingle();
   if (updateError) {
-    console.error('=== [API /api/ifood/dispatch] ERRO AO ATUALIZAR ORDERS NO SUPABASE ===');
-    console.error(JSON.stringify(updateError, null, 2));
+    console.error('O iFood aceitou o despacho, mas a atualização local falhou', updateError);
+    return res.status(500).json({ error: 'iFood despachou o pedido, mas o sistema não conseguiu atualizar o status local' });
+  }
+  if (!updatedOrder) {
+    return res.status(500).json({ error: 'iFood despachou o pedido, mas o status local não foi atualizado' });
   }
 
   console.log('=== [API /api/ifood/dispatch] SUCESSO — respondendo 200 ===');

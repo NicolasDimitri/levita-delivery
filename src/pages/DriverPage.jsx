@@ -14,14 +14,21 @@ export default function DriverPage() {
   const [totalWithdrawn, setTotalWithdrawn] = useState(0);
   const [loading, setLoading] = useState(true);
   const [withdrawNote, setWithdrawNote] = useState('');
+  const [ordersError, setOrdersError] = useState('');
 
   const loadOrders = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
       .eq('driver_id', session.user.id)
-      .eq('status', 'em_rota')
+      .in('status', ['pronto', 'em_rota'])
       .order('assigned_at', { ascending: true });
+    if (error) {
+      setOrdersError('Não foi possível carregar suas entregas. Atualize a página ou tente novamente.');
+      setLoading(false);
+      return;
+    }
+    setOrdersError('');
     setOrders(data || []);
     setLoading(false);
   }, [session]);
@@ -89,7 +96,7 @@ export default function DriverPage() {
   }, [tab, loadFinishedOrders, loadWithdrawals]);
 
   const tabs = [
-    { id: 'ativas',     label: `Em rota${orders.length > 0 ? ` (${orders.length})` : ''}` },
+    { id: 'ativas',     label: `Entregas${orders.length > 0 ? ` (${orders.length})` : ''}` },
     { id: 'finalizadas', label: 'Finalizadas' },
     { id: 'saque',      label: 'Carteira' },
   ];
@@ -134,6 +141,9 @@ export default function DriverPage() {
         {/* aba: em rota */}
         {tab === 'ativas' && (
           <>
+            {ordersError && (
+              <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-600">{ordersError}</p>
+            )}
             {loading && <p className="text-sm text-gray-400">Carregando...</p>}
             {!loading && orders.length === 0 && (
               <div className="mt-8 rounded-2xl border border-dashed border-gray-300 p-10 text-center">

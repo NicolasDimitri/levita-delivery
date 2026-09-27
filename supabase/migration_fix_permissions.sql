@@ -22,7 +22,7 @@ grant all on public.profiles to service_role;
 grant select on public.clientes to authenticated;
 grant all on public.clientes to service_role;
 
--- orders (update necessário pra admin atribuir entregador pelo frontend)
+-- orders (updates administrativos de status feitos pelo frontend)
 grant select, update on public.orders to authenticated;
 grant all on public.orders to service_role;
 

@@ -182,11 +182,10 @@ grant usage on schema public to authenticated;
 grant select, insert on public.profiles to authenticated;
 grant select on public.clientes to authenticated;
 
--- "update" em orders é necessário pra tela de admin conseguir atribuir
--- entregador (OrderCard.jsx faz supabase.from('orders').update(...) direto
--- do frontend, com a anon key). A RLS policy "admin acesso total a orders"
--- já restringe ISSO a quem é admin — o GRANT só libera a operação em si,
--- sem ele o Postgres bloqueia antes mesmo de avaliar a policy.
+-- "update" em orders é necessário para o admin alterar o status de preparo
+-- pela interface. A atribuição de entregadores passa pela API serverless,
+-- que valida o perfil e grava usando service_role. A RLS policy
+-- "admin acesso total a orders" restringe updates feitos pelo frontend.
 grant select, update on public.orders to authenticated;
 
 grant select on public.order_items to authenticated;

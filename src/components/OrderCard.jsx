@@ -1,5 +1,5 @@
 // src/components/OrderCard.jsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useApi } from '../lib/useApi';
 import { Button, Badge, SectionLabel, ErrorMsg } from '../lib/ui';
@@ -19,6 +19,11 @@ export default function OrderCard({ order, drivers, onChanged }) {
   const [cancellationReasons, setCancellationReasons] = useState([]);
   const [selectedCancellation, setSelectedCancellation] = useState('');
   const [error, setError] = useState('');
+  const [cancellationPending, setCancellationPending] = useState(false);
+
+  useEffect(() => {
+    setSelectedDriver(order.driver_id || '');
+  }, [order.driver_id]);
 
   const status = ORDER_STATUS[order.status] ?? ORDER_STATUS.recebido;
 
@@ -43,27 +48,27 @@ export default function OrderCard({ order, drivers, onChanged }) {
     if (!selected) return setError('Selecione um motivo de cancelamento.');
     const code = getCancellationCode(selected);
     const text = selected.description || selected.reason || selected.name || String(code);
-    return run('cancel', () => call('/api/ifood/cancel', {
-      body: { orderId: order.id, reason: text, cancellationCode: String(code) }
-    }));
+    return run('cancel', async () => {
+      await call('/api/ifood/cancel', {
+        body: { orderId: order.id, reason: text, cancellationCode: String(code) }
+      });
+      setCancellationPending(true);
+    });
   };
 
   const markReady = () => run('ready', async () => {
-    const { error: e } = await supabase.from('orders').update({ status: 'pronto' }).eq('id', order.id);
-    if (e) throw new Error(e.message);
+    const { error: updateError } = await supabase.from('orders').update({ status: 'pronto' }).eq('id', order.id);
+    if (updateError) throw new Error(updateError.message);
   });
 
   const assignDriver = () => {
     if (!selectedDriver) return setError('Selecione um entregador primeiro.');
-    run('assign', async () => {
-      const { error: e } = await supabase.from('orders')
-        .update({ driver_id: selectedDriver, assigned_at: new Date().toISOString() })
-        .eq('id', order.id);
-      if (e) throw new Error(e.message);
-    });
+    run('assign', () => call('/api/ifood/assign-driver', {
+      body: { orderId: order.id, driverId: selectedDriver }
+    }));
   };
 
-  const driverName = drivers.find(d => d.id === (order.driver_id || selectedDriver))?.name;
+  const driverName = drivers.find(d => d.id === order.driver_id)?.name;
   const loading = (k) => loadingKey === k;
 
   return (
@@ -109,6 +114,11 @@ export default function OrderCard({ order, drivers, onChanged }) {
       </div>
 
       <ErrorMsg message={error} />
+      {cancellationPending && order.status !== 'cancelado' && (
+        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-700">
+          Cancelamento solicitado; aguardando confirmação do iFood.
+        </p>
+      )}
 
       {/* ações por status */}
       {['recebido', 'em_preparo', 'pronto'].includes(order.status) && (
@@ -136,7 +146,8 @@ export default function OrderCard({ order, drivers, onChanged }) {
                   return <option key={`${code}-${index}`} value={String(code)}>{code} - {text}</option>;
                 })}
               </select>
-              <Button variant="danger" size="lg" onClick={cancelOrder} disabled={loading('cancel')}>
+              <Button variant="danger" size="lg" onClick={cancelOrder}
+                disabled={loading('cancel') || cancellationPending}>
                 {loading('cancel') ? 'Cancelando...' : 'Confirmar cancelamento'}
               </Button>
             </div>
@@ -160,11 +171,16 @@ export default function OrderCard({ order, drivers, onChanged }) {
               {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
             <Button variant="primary" onClick={assignDriver} disabled={loading('assign')}>
-              {loading('assign') ? '...' : driverName ? 'Trocar' : 'Atribuir'}
+              {loading('assign') ? 'Salvando...' : order.driver_id ? 'Trocar' : 'Atribuir'}
             </Button>
           </div>
           {driverName && <p className="text-xs text-gray-400">Atribuído: {driverName}</p>}
-          <Button variant="blue" size="lg" onClick={dispatch} disabled={loading('dispatch')}>
+          {!order.driver_id && <p className="text-xs text-amber-700">Atribua um entregador antes de despachar.</p>}
+          {order.driver_id && selectedDriver !== order.driver_id && (
+            <p className="text-xs text-amber-700">Salve a nova atribuição antes de despachar.</p>
+          )}
+          <Button variant="blue" size="lg" onClick={dispatch}
+            disabled={loading('dispatch') || !order.driver_id || selectedDriver !== order.driver_id}>
             {loading('dispatch') ? 'Despachando...' : 'Despachar pro iFood'}
           </Button>
         </div>

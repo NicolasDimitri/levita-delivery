@@ -58,7 +58,9 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: 'Pedido não encontrado' });
   }
 
-    console.log('=== [API /api/ifood/verify-delivery] PEDIDO ENCONTRADO NO SUPABASE ===', { orderId, status: order.status });
+  if (order.status !== 'em_rota') {
+    return res.status(409).json({ error: 'A entrega só pode ser confirmada depois do despacho' });
+  }
 
   // só o entregador responsável ou um admin pode confirmar essa entrega
   if (order.driver_id !== requesterId) {
@@ -107,25 +109,29 @@ export default async function handler(req, res) {
     return res.status(200).json({ valid: false });
   }
 
-  // A partir daqui o iFood JÁ confirmou a entrega (não há como desfazer isso).
-  // Se qualquer escrita no Supabase falhar agora, precisamos pelo menos
-  // logar bem alto e ainda assim devolver valid:true pro entregador —
-  // já que a entrega É válida do ponto de vista do iFood — em vez de deixar
-  // a exception estourar sem resposta (o que gerava o "Unexpected end of
-  // JSON input" no frontend).
+  // A partir daqui o iFood já confirmou a entrega. Falha ao persistir o estado
+  // local deve ser explícita para que a reconciliação pelo webhook possa ocorrer.
   try {
-    const { error: updateOrderError } = await supabaseAdmin
+    const { data: updatedOrder, error: updateOrderError } = await supabaseAdmin
       .from('orders')
       .update({
         status: 'entregue',
         delivery_code_confirmado: codeToUse,
         delivered_at: new Date().toISOString()
       })
-      .eq('id', order.id);
+      .eq('id', order.id)
+      .eq('status', 'em_rota')
+      .select('id')
+      .maybeSingle();
 
     if (updateOrderError) {
-      console.error('=== [VERIFY-DELIVERY] FALHA ao marcar pedido como entregue no Supabase ===');
-      console.error('Pedido iFood já confirmado, mas orders.update falhou:', updateOrderError);
+      console.error('iFood confirmou a entrega, mas a atualização local falhou', updateOrderError);
+      return res.status(500).json({
+        error: 'iFood confirmou a entrega, mas o sistema não conseguiu atualizar o pedido. Aguarde a sincronização automática.'
+      });
+    }
+    if (!updatedOrder) {
+      return res.status(409).json({ error: 'O status do pedido mudou durante a confirmação. Atualize a tela.' });
     }
 
     if (order.ifood_customer_id) {
@@ -143,20 +149,30 @@ export default async function handler(req, res) {
     }
 
     if (order.driver_id) {
-      const { error: historyError } = await supabaseAdmin.from('delivery_history').insert({
-        driver_id: order.driver_id,
-        order_id: order.id,
-        valor_entrega: order.delivery_fee
-      });
-
-      if (historyError) {
-        console.error('=== [VERIFY-DELIVERY] falha ao registrar historico de entrega ===', historyError);
+      const { data: existingHistory, error: historyLookupError } = await supabaseAdmin
+        .from('delivery_history')
+        .select('id')
+        .eq('order_id', order.id)
+        .limit(1)
+        .maybeSingle();
+      if (historyLookupError) {
+        console.error('Falha ao verificar o histórico da entrega', historyLookupError);
+      } else if (!existingHistory) {
+        const { error: historyError } = await supabaseAdmin.from('delivery_history').insert({
+          driver_id: order.driver_id,
+          order_id: order.id,
+          valor_entrega: order.delivery_fee
+        });
+        if (historyError) {
+          console.error('Falha ao registrar histórico de entrega', historyError);
+        }
       }
     }
   } catch (err) {
-    // nunca deixa um erro inesperado aqui derrubar a resposta sem corpo —
-    // a entrega já foi confirmada no iFood, então sempre respondemos valid:true
     console.error('=== [VERIFY-DELIVERY] erro inesperado pós-confirmação iFood ===', err);
+    return res.status(500).json({
+      error: 'iFood confirmou a entrega, mas ocorreu uma falha ao salvar o resultado. Aguarde a sincronização automática.'
+    });
   }
 
   console.log('=== [API /api/ifood/verify-delivery] SUCESSO — respondendo valid:true ===');

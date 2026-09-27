@@ -55,13 +55,5 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Erro ao solicitar cancelamento no iFood' });
   }
 
-  const { error } = await supabaseAdmin
-    .from('orders')
-    .update({ status: 'cancelado' })
-    .eq('id', order.id);
-  if (error) {
-    console.error('Solicitação aceita pelo iFood, mas falhou ao atualizar o pedido local', error);
-  }
-
   return res.status(200).json({ ok: true, pending: true });
 }
