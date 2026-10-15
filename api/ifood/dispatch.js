@@ -5,6 +5,7 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { readyToPickupOrder } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
+  const startedAt = Date.now();
   console.log('=== [API /api/ifood/dispatch] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
@@ -20,22 +21,31 @@ export default async function handler(req, res) {
   const jwt = authHeader.replace('Bearer ', '');
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
   if (userError || !userData?.user) {
-    console.log('=== [API /api/ifood/dispatch] FALHA NA AUTENTICAÇÃO ===');
+    console.warn('=== [API /api/ifood/dispatch] FALHA NA AUTENTICAÇÃO ===', {
+      error: userError?.message || null
+    });
     return res.status(401).json({ error: 'Não autenticado' });
   }
 
-  const { data: profile } = await supabaseAdmin
+  const { data: profile, error: profileError } = await supabaseAdmin
     .from('profiles')
     .select('role')
     .eq('id', userData.user.id)
     .single();
 
+  if (profileError) {
+    console.error('=== [API /api/ifood/dispatch] FALHA AO CONSULTAR PERFIL ===', profileError);
+    return res.status(500).json({ error: 'Não foi possível validar o perfil do usuário' });
+  }
+
   if (profile?.role !== 'admin') {
+    console.warn('=== [API /api/ifood/dispatch] PERFIL SEM PERMISSÃO ===', { role: profile?.role || null });
     return res.status(403).json({ error: 'Apenas administradores podem despachar pedidos' });
   }
 
   const { orderId } = req.body || {};
   if (!orderId) {
+    console.warn('=== [API /api/ifood/dispatch] orderId AUSENTE ===');
     return res.status(400).json({ error: 'orderId é obrigatório' });
   }
 
@@ -44,11 +54,33 @@ export default async function handler(req, res) {
     .select('id, ifood_order_id, status, driver_id')
     .eq('id', orderId)
     .single();
-  if (orderError || !order) return res.status(404).json({ error: 'Pedido não encontrado' });
+  if (orderError || !order) {
+    console.error('=== [API /api/ifood/dispatch] PEDIDO NÃO ENCONTRADO NO SUPABASE ===', {
+      orderId,
+      error: orderError?.message || null,
+      code: orderError?.code || null
+    });
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+  console.log('=== [API /api/ifood/dispatch] VALIDANDO PEDIDO ===', {
+    orderId: order.id,
+    ifoodOrderId: order.ifood_order_id,
+    currentStatus: order.status,
+    hasAssignedDriver: Boolean(order.driver_id)
+  });
   if (order.status !== 'pronto') {
+    console.warn('=== [API /api/ifood/dispatch] STATUS IMPEDE DESPACHO ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id,
+      currentStatus: order.status
+    });
     return res.status(409).json({ error: 'O pedido precisa estar pronto antes do despacho' });
   }
   if (!order.driver_id) {
+    console.warn('=== [API /api/ifood/dispatch] PEDIDO SEM ENTREGADOR ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id
+    });
     return res.status(400).json({ error: 'Atribua um entregador antes de despachar o pedido' });
   }
   const { data: assignedDriver, error: assignedDriverError } = await supabaseAdmin
@@ -58,9 +90,19 @@ export default async function handler(req, res) {
     .eq('role', 'driver')
     .single();
   if (assignedDriverError || !assignedDriver) {
+    console.error('=== [API /api/ifood/dispatch] ENTREGADOR ATRIBUÍDO INVÁLIDO ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id,
+      error: assignedDriverError?.message || null,
+      code: assignedDriverError?.code || null
+    });
     return res.status(409).json({ error: 'O pedido não está atribuído a um entregador válido' });
   }
 
+  console.log('=== [API /api/ifood/dispatch] CHAMANDO READY_TO_PICKUP ===', {
+    orderId: order.id,
+    ifoodOrderId: order.ifood_order_id
+  });
   try {
     const ifoodRes = await readyToPickupOrder(order.ifood_order_id);
     console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (readyToPickup) ===', {
@@ -69,12 +111,33 @@ export default async function handler(req, res) {
     });
     if (!ifoodRes.ok) {
       const text = await ifoodRes.text();
-      console.log('=== [API /api/ifood/dispatch] CORPO DE ERRO DO IFOOD ===', { length: text.length });
+      let errorDetails = { responseLength: text.length };
+      try {
+        const parsed = JSON.parse(text);
+        errorDetails = {
+          responseLength: text.length,
+          errorType: parsed.errorType || parsed.type || null,
+          code: parsed.code || null,
+          message: parsed.message || parsed.description || null
+        };
+      } catch {
+        // Avoid logging arbitrary response bodies that could contain customer data.
+      }
+      console.error('=== [API /api/ifood/dispatch] IFOOD RECUSOU O DESPACHO ===', {
+        orderId: order.id,
+        ifoodOrderId: order.ifood_order_id,
+        status: ifoodRes.status,
+        ...errorDetails
+      });
       return res.status(502).json({ error: `iFood recusou o despacho: ${text}` });
     }
   } catch (err) {
-    console.error('=== [API /api/ifood/dispatch] EXCEÇÃO AO CHAMAR IFOOD ===');
-    console.error(err);
+    console.error('=== [API /api/ifood/dispatch] EXCEÇÃO AO CHAMAR IFOOD ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id,
+      durationMs: Date.now() - startedAt,
+      error: err.message
+    });
     return res.status(502).json({ error: 'Erro ao despachar pedido no iFood' });
   }
 
@@ -87,7 +150,14 @@ export default async function handler(req, res) {
     .select('id')
     .maybeSingle();
   if (updateError) {
-    console.error('O iFood aceitou o despacho, mas a atualização local falhou', updateError);
+    console.error('=== [API /api/ifood/dispatch] IFOOD ACEITOU, MAS SUPABASE FALHOU ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id,
+      error: updateError.message,
+      code: updateError.code,
+      details: updateError.details,
+      hint: updateError.hint
+    });
     return res.status(500).json({ error: 'iFood despachou o pedido, mas o sistema não conseguiu atualizar o status local' });
   }
   if (!updatedOrder) {
@@ -97,14 +167,29 @@ export default async function handler(req, res) {
       .eq('id', order.id)
       .single();
     if (latestOrderError) {
-      console.error('iFood aceitou o despacho, mas não foi possível verificar o status local', latestOrderError);
+      console.error('=== [API /api/ifood/dispatch] FALHA AO VERIFICAR STATUS APÓS CONFLITO ===', {
+        orderId: order.id,
+        ifoodOrderId: order.ifood_order_id,
+        error: latestOrderError.message,
+        code: latestOrderError.code
+      });
       return res.status(500).json({ error: 'iFood despachou o pedido, mas o sistema não conseguiu verificar o status local' });
     }
     if (!['em_rota', 'entregue'].includes(latestOrder.status)) {
+      console.warn('=== [API /api/ifood/dispatch] STATUS LOCAL INESPERADO APÓS SUCESSO IFOOD ===', {
+        orderId: order.id,
+        ifoodOrderId: order.ifood_order_id,
+        status: latestOrder.status
+      });
       return res.status(409).json({ error: 'iFood despachou o pedido, mas o status local mudou. Atualize a tela.' });
     }
   }
 
-  console.log('=== [API /api/ifood/dispatch] SUCESSO — respondendo 200 ===');
+  console.log('=== [API /api/ifood/dispatch] SUCESSO ===', {
+    orderId: order.id,
+    ifoodOrderId: order.ifood_order_id,
+    status: updatedOrder ? 'em_rota' : 'já avançado',
+    durationMs: Date.now() - startedAt
+  });
   return res.status(200).json({ ok: true });
 }

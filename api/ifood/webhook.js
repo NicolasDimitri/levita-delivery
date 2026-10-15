@@ -38,6 +38,7 @@ function isValidSignature(rawBody, signatureHeader) {
 }
 
 export default async function handler(req, res) {
+  const startedAt = Date.now();
   console.log('=== [API /api/ifood/webhook] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
@@ -46,21 +47,32 @@ export default async function handler(req, res) {
   });
 
   if (req.method !== 'POST') {
+    console.warn('=== [API /api/ifood/webhook] MÉTODO NÃO PERMITIDO ===', { method: req.method });
     return res.status(405).send('Method not allowed');
   }
 
-  const rawBody = await readRawBody(req);
+  let rawBody;
+  try {
+    rawBody = await readRawBody(req);
+  } catch (err) {
+    console.error('=== [API /api/ifood/webhook] FALHA AO LER CORPO ===', { error: err.message });
+    return res.status(500).send('Could not read request body');
+  }
   const signature = req.headers['x-ifood-signature'];
 
   if (!isValidSignature(rawBody, signature)) {
-    console.warn('Webhook com assinatura inválida recebido');
+    console.warn('=== [API /api/ifood/webhook] ASSINATURA INVÁLIDA ===', {
+      hasSignature: Boolean(signature),
+      bodyLength: rawBody.length
+    });
     return res.status(401).send('Invalid signature');
   }
 
   let payload;
   try {
     payload = JSON.parse(rawBody.toString('utf8'));
-  } catch {
+  } catch (err) {
+    console.error('=== [API /api/ifood/webhook] JSON INVÁLIDO ===', { error: err.message });
     return res.status(400).send('Invalid JSON');
   }
 
@@ -80,11 +92,25 @@ export default async function handler(req, res) {
       await processEvent(event);
     } catch (err) {
       processingFailed = true;
-      console.error('Erro ao processar evento', event?.id, event?.code, err);
+      console.error('=== [WEBHOOK] FALHA AO PROCESSAR EVENTO ===', {
+        eventId: event?.id || null,
+        code: event?.code || null,
+        orderId: event?.orderId || null,
+        error: err.message,
+        codeError: err.code || null,
+        details: err.details || null,
+        hint: err.hint || null
+      });
     }
   }
 
-  return res.status(processingFailed ? 500 : 202).send();
+  const statusCode = processingFailed ? 500 : 202;
+  console.log('=== [API /api/ifood/webhook] PROCESSAMENTO FINALIZADO ===', {
+    eventCount: events.length,
+    statusCode,
+    durationMs: Date.now() - startedAt
+  });
+  return res.status(statusCode).send();
 }
 
 async function processEvent(event) {
@@ -105,6 +131,9 @@ async function processEvent(event) {
   }
 
   switch (String(event.code || '').toUpperCase()) {
+    case 'KEEPALIVE':
+      console.log('=== [WEBHOOK] keepalive do iFood recebido ===', { eventId: event.id });
+      break;
     case 'PLC':
     case 'PLACED':
       await handlePlaced(event);
@@ -139,6 +168,12 @@ async function processEvent(event) {
     .from('webhook_events')
     .insert({ id: event.id });
   if (insertError && insertError.code !== '23505') throw insertError;
+  console.log('=== [WEBHOOK] evento processado e registrado ===', {
+    eventId: event.id,
+    code: event.code || null,
+    orderId: event.orderId || null,
+    duplicateRace: insertError?.code === '23505'
+  });
 }
 
 async function updateOrderStatusFromEvent(event, targetStatus, allowedStatuses) {
@@ -204,11 +239,23 @@ async function handlePlaced(event) {
     .eq('ifood_order_id', event.orderId)
     .maybeSingle();
   if (existingOrderError) throw existingOrderError;
-  if (existingOrder) return;
+  if (existingOrder) {
+    console.log('=== [WEBHOOK] pedido já existe; PLC não duplicado ===', {
+      eventId: event.id,
+      orderId: event.orderId,
+      localOrderId: existingOrder.id
+    });
+    return;
+  }
 
   const order = await getOrderDetails(event.orderId);
 
-  console.log('=== [WEBHOOK] pedido carregado do iFood ===', { orderId: order?.id, displayId: order?.displayId });
+  console.log('=== [WEBHOOK] pedido carregado do iFood ===', {
+    eventId: event.id,
+    orderId: order?.id,
+    displayId: order?.displayId,
+    deliveryDateTime: order?.delivery?.deliveryDateTime || null
+  });
 
   if (!order) throw new Error(`Pedido ${event.orderId} ainda não está disponível no iFood`);
 
@@ -254,9 +301,22 @@ async function handlePlaced(event) {
 
   if (error) {
     if (error.code === '23505') return;
-    console.error('Erro ao inserir pedido', error);
+    console.error('=== [WEBHOOK] FALHA AO INSERIR PEDIDO NO SUPABASE ===', {
+      eventId: event.id,
+      orderId: order.id,
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint
+    });
     throw error;
   }
+  console.log('=== [WEBHOOK] pedido criado no Supabase ===', {
+    eventId: event.id,
+    orderId: order.id,
+    localOrderId: insertedOrder.id,
+    displayId: order.displayId
+  });
 
   // NOTA: os nomes de campo abaixo (item.options, item.unitPrice) seguem o formato
   // documentado publicamente, mas vale conferir com um pedido de teste real no
@@ -264,7 +324,7 @@ async function handlePlaced(event) {
   // com um nome de campo levemente diferente dependendo da categoria do pedido.
   const items = order.items || [];
   for (const item of items) {
-    const { data: insertedItem } = await supabaseAdmin
+    const { data: insertedItem, error: itemError } = await supabaseAdmin
       .from('order_items')
       .insert({
         order_id: insertedOrder.id,
@@ -275,16 +335,37 @@ async function handlePlaced(event) {
       .select()
       .single();
 
-    if (!insertedItem) continue;
+    if (itemError || !insertedItem) {
+      console.error('=== [WEBHOOK] FALHA AO INSERIR ITEM DO PEDIDO ===', {
+        eventId: event.id,
+        orderId: order.id,
+        localOrderId: insertedOrder.id,
+        itemName: item.name,
+        error: itemError?.message || 'Insert returned no item',
+        code: itemError?.code || null
+      });
+      continue;
+    }
 
     const additions = item.options || item.subItems || [];
     for (const add of additions) {
-      await supabaseAdmin.from('order_item_additions').insert({
+      const { error: additionError } = await supabaseAdmin.from('order_item_additions').insert({
         order_item_id: insertedItem.id,
         name: add.name,
         quantity: add.quantity ?? 1,
         unit_price: add.unitPrice ?? add.price ?? 0
       });
+      if (additionError) {
+        console.error('=== [WEBHOOK] FALHA AO INSERIR ADICIONAL DO PEDIDO ===', {
+          eventId: event.id,
+          orderId: order.id,
+          localOrderId: insertedOrder.id,
+          itemName: item.name,
+          additionName: add.name,
+          error: additionError.message,
+          code: additionError.code
+        });
+      }
     }
   }
 }
@@ -297,8 +378,16 @@ async function handleConcluded(event) {
     .maybeSingle();
   if (orderError) throw orderError;
   if (!order) throw new Error(`Pedido ${event.orderId} não encontrado para conclusão`);
-  if (order.status === 'cancelado') return;
+  if (order.status === 'cancelado') {
+    console.warn('=== [WEBHOOK] CONCLUSÃO IGNORADA: pedido já cancelado ===', {
+      eventId: event.id,
+      orderId: event.orderId,
+      localOrderId: order.id
+    });
+    return;
+  }
 
+  let statusUpdated = false;
   if (order.status !== 'entregue') {
     const { data: updatedOrder, error: updateError } = await supabaseAdmin
       .from('orders')
@@ -308,6 +397,7 @@ async function handleConcluded(event) {
       .select('id')
       .maybeSingle();
     if (updateError) throw updateError;
+    statusUpdated = Boolean(updatedOrder);
     if (!updatedOrder) {
       const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
         .from('orders')
@@ -319,6 +409,15 @@ async function handleConcluded(event) {
       if (latestOrder.status !== 'entregue') throw new Error('Não foi possível atualizar o status concluído');
     }
   }
+
+  console.log('=== [WEBHOOK] pedido concluído no Supabase ===', {
+    eventId: event.id,
+    orderId: event.orderId,
+    localOrderId: order.id,
+    previousStatus: order.status,
+    status: 'entregue',
+    statusUpdated
+  });
 
   if (order.driver_id) {
     const { data: history, error: historyLookupError } = await supabaseAdmin
@@ -336,6 +435,18 @@ async function handleConcluded(event) {
         valor_entrega: order.delivery_fee
       });
       if (historyInsertError) throw historyInsertError;
+      console.log('=== [WEBHOOK] histórico de entrega criado ===', {
+        eventId: event.id,
+        orderId: event.orderId,
+        localOrderId: order.id,
+        driverId: order.driver_id
+      });
+    } else {
+      console.log('=== [WEBHOOK] histórico de entrega já existia ===', {
+        eventId: event.id,
+        orderId: event.orderId,
+        localOrderId: order.id
+      });
     }
   }
 }
