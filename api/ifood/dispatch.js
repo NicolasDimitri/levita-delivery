@@ -91,7 +91,18 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'iFood despachou o pedido, mas o sistema não conseguiu atualizar o status local' });
   }
   if (!updatedOrder) {
-    return res.status(500).json({ error: 'iFood despachou o pedido, mas o status local não foi atualizado' });
+    const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
+      .from('orders')
+      .select('status')
+      .eq('id', order.id)
+      .single();
+    if (latestOrderError) {
+      console.error('iFood aceitou o despacho, mas não foi possível verificar o status local', latestOrderError);
+      return res.status(500).json({ error: 'iFood despachou o pedido, mas o sistema não conseguiu verificar o status local' });
+    }
+    if (!['em_rota', 'entregue'].includes(latestOrder.status)) {
+      return res.status(409).json({ error: 'iFood despachou o pedido, mas o status local mudou. Atualize a tela.' });
+    }
   }
 
   console.log('=== [API /api/ifood/dispatch] SUCESSO — respondendo 200 ===');
