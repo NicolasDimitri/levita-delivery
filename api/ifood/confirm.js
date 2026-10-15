@@ -59,10 +59,31 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Erro ao confirmar pedido no iFood' });
   }
 
-  const { error: updateError } = await supabaseAdmin.from('orders').update({ status: 'em_preparo' }).eq('id', order.id);
+  const { data: updatedOrder, error: updateError } = await supabaseAdmin
+    .from('orders')
+    .update({ status: 'em_preparo' })
+    .eq('id', order.id)
+    .eq('status', 'recebido')
+    .select('id')
+    .maybeSingle();
   if (updateError) {
     console.error('=== [API /api/ifood/confirm] ERRO AO ATUALIZAR ORDERS NO SUPABASE ===');
     console.error(JSON.stringify(updateError, null, 2));
+    return res.status(500).json({ error: 'iFood confirmou o pedido, mas o sistema não conseguiu atualizar o status local' });
+  }
+  if (!updatedOrder) {
+    const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
+      .from('orders')
+      .select('status')
+      .eq('id', order.id)
+      .single();
+    if (latestOrderError) {
+      console.error('Pedido confirmado no iFood, mas não foi possível verificar o status local', latestOrderError);
+      return res.status(500).json({ error: 'iFood confirmou o pedido, mas o sistema não conseguiu verificar o status local' });
+    }
+    if (!['em_preparo', 'pronto', 'em_rota', 'entregue'].includes(latestOrder.status)) {
+      return res.status(409).json({ error: 'iFood confirmou o pedido, mas o status local mudou. Atualize a tela.' });
+    }
   }
 
   console.log('=== [API /api/ifood/confirm] SUCESSO — respondendo 200 ===');

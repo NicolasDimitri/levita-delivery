@@ -72,6 +72,11 @@ export default async function handler(req, res) {
   let processingFailed = false;
   for (const event of events) {
     try {
+      console.log('=== [WEBHOOK] processando evento do iFood ===', {
+        eventId: event?.id || null,
+        code: event?.code || null,
+        orderId: event?.orderId || null
+      });
       await processEvent(event);
     } catch (err) {
       processingFailed = true;
@@ -83,7 +88,9 @@ export default async function handler(req, res) {
 }
 
 async function processEvent(event) {
-  if (!event?.id) return;
+  if (!event?.id) {
+    throw new Error('Evento do iFood sem identificador; não é possível processá-lo com segurança');
+  }
 
   const { data: already, error: lookupError } = await supabaseAdmin
     .from('webhook_events')
@@ -92,12 +99,23 @@ async function processEvent(event) {
     .maybeSingle();
 
   if (lookupError) throw lookupError;
-  if (already) return;
+  if (already) {
+    console.log('=== [WEBHOOK] evento duplicado ignorado ===', { eventId: event.id, code: event.code });
+    return;
+  }
 
-  switch (event.code) {
+  switch (String(event.code || '').toUpperCase()) {
     case 'PLC':
     case 'PLACED':
       await handlePlaced(event);
+      break;
+    case 'CFM':
+    case 'CONFIRMED':
+      await handleConfirmed(event);
+      break;
+    case 'DSP':
+    case 'DISPATCHED':
+      await handleDispatched(event);
       break;
     case 'CONC':
     case 'CON':
@@ -109,7 +127,11 @@ async function processEvent(event) {
       await handleCancelled(event);
       break;
     default:
-      // outros eventos (CFM/CONFIRMED, DSP/DISPATCHED, etc.) não usados no MVP
+      console.warn('=== [WEBHOOK] evento recebido, mas não tratado ===', {
+        eventId: event.id,
+        code: event.code || null,
+        orderId: event.orderId || null
+      });
       break;
   }
 
@@ -117,6 +139,62 @@ async function processEvent(event) {
     .from('webhook_events')
     .insert({ id: event.id });
   if (insertError && insertError.code !== '23505') throw insertError;
+}
+
+async function updateOrderStatusFromEvent(event, targetStatus, allowedStatuses) {
+  const { data: order, error: orderError } = await supabaseAdmin
+    .from('orders')
+    .select('id, status')
+    .eq('ifood_order_id', event.orderId)
+    .maybeSingle();
+  if (orderError) throw orderError;
+  if (!order) throw new Error(`Pedido ${event.orderId} não encontrado para evento ${event.code}`);
+
+  if (!allowedStatuses.includes(order.status)) {
+    console.log('=== [WEBHOOK] transição já aplicada ou status mais avançado; sem alteração ===', {
+      eventId: event.id,
+      code: event.code,
+      orderId: event.orderId,
+      currentStatus: order.status,
+      targetStatus
+    });
+    return;
+  }
+
+  const { data: updatedOrder, error: updateError } = await supabaseAdmin
+    .from('orders')
+    .update({ status: targetStatus })
+    .eq('id', order.id)
+    .in('status', allowedStatuses)
+    .select('id')
+    .maybeSingle();
+  if (updateError) throw updateError;
+
+  if (!updatedOrder) {
+    const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
+      .from('orders')
+      .select('status')
+      .eq('id', order.id)
+      .single();
+    if (latestOrderError) throw latestOrderError;
+    if (!allowedStatuses.includes(latestOrder.status)) return;
+    throw new Error(`Não foi possível atualizar o pedido ${event.orderId} para ${targetStatus}`);
+  }
+
+  console.log('=== [WEBHOOK] status do pedido atualizado pelo evento ===', {
+    eventId: event.id,
+    code: event.code,
+    orderId: event.orderId,
+    status: targetStatus
+  });
+}
+
+async function handleConfirmed(event) {
+  await updateOrderStatusFromEvent(event, 'em_preparo', ['recebido']);
+}
+
+async function handleDispatched(event) {
+  await updateOrderStatusFromEvent(event, 'em_rota', ['pronto']);
 }
 
 async function handlePlaced(event) {
