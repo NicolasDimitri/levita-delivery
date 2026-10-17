@@ -142,6 +142,9 @@ async function processEvent(event) {
     case 'CONFIRMED':
       await handleConfirmed(event);
       break;
+    case 'RTP':
+      await handleReadyToPickup(event);
+      break;
     case 'DSP':
     case 'DISPATCHED':
       await handleDispatched(event);
@@ -230,6 +233,10 @@ async function handleConfirmed(event) {
 
 async function handleDispatched(event) {
   await updateOrderStatusFromEvent(event, 'em_rota', ['pronto']);
+}
+
+async function handleReadyToPickup(event) {
+  await updateOrderStatusFromEvent(event, 'pronto', ['em_preparo']);
 }
 
 async function handlePlaced(event) {

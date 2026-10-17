@@ -1,6 +1,5 @@
 // src/components/OrderCard.jsx
 import { useEffect, useState } from 'react';
-import { supabase } from '../supabaseClient';
 import { useApi } from '../lib/useApi';
 import { Button, Badge, SectionLabel, ErrorMsg } from '../lib/ui';
 import CountdownTimer from './CountdownTimer';
@@ -56,10 +55,9 @@ export default function OrderCard({ order, drivers, onChanged }) {
     });
   };
 
-  const markReady = () => run('ready', async () => {
-    const { error: updateError } = await supabase.from('orders').update({ status: 'pronto' }).eq('id', order.id);
-    if (updateError) throw new Error(updateError.message);
-  });
+  const markReady = () => run('ready', () => call('/api/ifood/ready-to-pickup', {
+    body: { orderId: order.id }
+  }));
 
   const assignDriver = () => {
     if (!selectedDriver) return setError('Selecione um entregador primeiro.');
@@ -166,11 +164,12 @@ export default function OrderCard({ order, drivers, onChanged }) {
         <div className="space-y-2">
           <div className="flex gap-2">
             <select value={selectedDriver} onChange={e => setSelectedDriver(e.target.value)}
-              className="flex-1 rounded-xl border-2 border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none">
+              disabled={Boolean(order.ifood_dispatched_at)}
+              className="flex-1 rounded-xl border-2 border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none disabled:bg-gray-100">
               <option value="">Selecionar entregador</option>
               {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
-            <Button variant="primary" onClick={assignDriver} disabled={loading('assign')}>
+            <Button variant="primary" onClick={assignDriver} disabled={loading('assign') || Boolean(order.ifood_dispatched_at)}>
               {loading('assign') ? 'Salvando...' : order.driver_id ? 'Trocar' : 'Atribuir'}
             </Button>
           </div>
@@ -179,9 +178,12 @@ export default function OrderCard({ order, drivers, onChanged }) {
           {order.driver_id && selectedDriver !== order.driver_id && (
             <p className="text-xs text-amber-700">Salve a nova atribuição antes de despachar.</p>
           )}
+          {order.ifood_dispatched_at && (
+            <p className="text-xs text-amber-700">Despacho solicitado ao iFood; aguardando confirmação.</p>
+          )}
           <Button variant="blue" size="lg" onClick={dispatch}
-            disabled={loading('dispatch') || !order.driver_id || selectedDriver !== order.driver_id}>
-            {loading('dispatch') ? 'Despachando...' : 'Despachar pro iFood'}
+            disabled={loading('dispatch') || !order.driver_id || selectedDriver !== order.driver_id || Boolean(order.ifood_dispatched_at)}>
+            {loading('dispatch') ? 'Despachando...' : order.ifood_dispatched_at ? 'Despacho solicitado' : 'Despachar pro iFood'}
           </Button>
         </div>
       )}

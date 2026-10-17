@@ -28,12 +28,15 @@ export default async function handler(req, res) {
 
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .select('id, status')
+    .select('id, status, ifood_dispatched_at')
     .eq('id', orderId)
     .single();
   if (orderError || !order) return res.status(404).json({ error: 'Pedido não encontrado' });
   if (order.status !== 'pronto') {
     return res.status(409).json({ error: 'O pedido precisa estar pronto para ser atribuído' });
+  }
+  if (order.ifood_dispatched_at) {
+    return res.status(409).json({ error: 'O entregador não pode ser alterado após solicitar o despacho ao iFood' });
   }
 
   const { data: driver, error: driverError } = await supabaseAdmin
