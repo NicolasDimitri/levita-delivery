@@ -146,9 +146,10 @@ Isso roda frontend + funções serverless juntos localmente.
 1. No Portal do iFood, use a **loja de teste** pra gerar um pedido de teste (tem essa opção dentro do ambiente de homologação)
 2. O evento `PLACED` deve chegar no seu webhook e o pedido deve aparecer na tela `/admin`
 3. Clique em **Aceitar pedido**
-4. Selecione um entregador (cadastre um entregador de teste em `/cadastro` antes) e clique em **Despachar**
-5. Faça login como esse entregador em outra aba → o pedido deve aparecer em `/entregas`
-6. Clique em **Confirmar entrega** e digite um código de teste (no ambiente de homologação o iFood costuma fornecer um código de teste fixo — confira a documentação de "Gerar pedidos teste")
+4. Durante o preparo, clique em **Marcar como pronto**; isso informa `readyToPickup` ao iFood antes de atualizar o status local
+5. Selecione um entregador (cadastre um entregador de teste em `/cadastro` antes) e clique em **Despachar**; para entregas próprias, a API informa `deliveredBy: MERCHANT`
+6. Faça login como esse entregador em outra aba → o pedido deve aparecer em `/entregas`
+7. Clique em **Confirmar entrega** e informe o código de confirmação fornecido para aquele pedido pelo iFood
 
 ---
 

@@ -1,8 +1,8 @@
 // api/ifood/dispatch.js
-// Informa ao iFood que o pedido está pronto para retirada pelo entregador.
+// Solicita ao iFood o despacho de um pedido de entrega própria.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-import { readyToPickupOrder } from '../../lib/ifood.js';
+import { dispatchOrder } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
   const startedAt = Date.now();
@@ -51,7 +51,7 @@ export default async function handler(req, res) {
 
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .select('id, ifood_order_id, status, driver_id')
+    .select('id, ifood_order_id, status, driver_id, ifood_dispatched_at')
     .eq('id', orderId)
     .single();
   if (orderError || !order) {
@@ -83,6 +83,14 @@ export default async function handler(req, res) {
     });
     return res.status(400).json({ error: 'Atribua um entregador antes de despachar o pedido' });
   }
+  if (order.ifood_dispatched_at) {
+    console.log('=== [API /api/ifood/dispatch] DESPACHO JÁ SOLICITADO; AGUARDANDO EVENTO DSP ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id,
+      dispatchedAt: order.ifood_dispatched_at
+    });
+    return res.status(200).json({ ok: true, pending: true });
+  }
   const { data: assignedDriver, error: assignedDriverError } = await supabaseAdmin
     .from('profiles')
     .select('id')
@@ -99,13 +107,13 @@ export default async function handler(req, res) {
     return res.status(409).json({ error: 'O pedido não está atribuído a um entregador válido' });
   }
 
-  console.log('=== [API /api/ifood/dispatch] CHAMANDO READY_TO_PICKUP ===', {
+  console.log('=== [API /api/ifood/dispatch] CHAMANDO DISPATCH (MERCHANT) ===', {
     orderId: order.id,
     ifoodOrderId: order.ifood_order_id
   });
   try {
-    const ifoodRes = await readyToPickupOrder(order.ifood_order_id);
-    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (readyToPickup) ===', {
+    const ifoodRes = await dispatchOrder(order.ifood_order_id);
+    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (dispatch) ===', {
       status: ifoodRes.status,
       ok: ifoodRes.ok
     });
@@ -143,9 +151,8 @@ export default async function handler(req, res) {
 
   const { data: updatedOrder, error: updateError } = await supabaseAdmin
     .from('orders')
-    .update({ ifood_dispatched_at: new Date().toISOString(), status: 'em_rota' })
+    .update({ ifood_dispatched_at: new Date().toISOString() })
     .eq('id', order.id)
-    .eq('status', 'pronto')
     .eq('driver_id', order.driver_id)
     .select('id')
     .maybeSingle();
@@ -163,7 +170,7 @@ export default async function handler(req, res) {
   if (!updatedOrder) {
     const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
       .from('orders')
-      .select('status')
+      .select('status, driver_id')
       .eq('id', order.id)
       .single();
     if (latestOrderError) {
@@ -175,7 +182,7 @@ export default async function handler(req, res) {
       });
       return res.status(500).json({ error: 'iFood despachou o pedido, mas o sistema não conseguiu verificar o status local' });
     }
-    if (!['em_rota', 'entregue'].includes(latestOrder.status)) {
+    if (latestOrder.driver_id !== order.driver_id || !['em_rota', 'entregue'].includes(latestOrder.status)) {
       console.warn('=== [API /api/ifood/dispatch] STATUS LOCAL INESPERADO APÓS SUCESSO IFOOD ===', {
         orderId: order.id,
         ifoodOrderId: order.ifood_order_id,
@@ -188,7 +195,7 @@ export default async function handler(req, res) {
   console.log('=== [API /api/ifood/dispatch] SUCESSO ===', {
     orderId: order.id,
     ifoodOrderId: order.ifood_order_id,
-    status: updatedOrder ? 'em_rota' : 'já avançado',
+    status: updatedOrder ? 'despacho solicitado; aguardando evento DSP' : 'já avançado',
     durationMs: Date.now() - startedAt
   });
   return res.status(200).json({ ok: true });
