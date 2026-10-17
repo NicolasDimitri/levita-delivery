@@ -55,8 +55,8 @@ export default function OrderCard({ order, drivers, onChanged }) {
     });
   };
 
-  const markReady = () => run('ready', () => call('/api/ifood/ready-to-pickup', {
-    body: { orderId: order.id }
+  const markReady = () => run('ready', () => call('/api/ifood/dispatch', {
+    body: { orderId: order.id, action: 'ready' }
   }));
 
   const assignDriver = () => {

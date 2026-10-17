@@ -2,7 +2,7 @@
 // Solicita ao iFood o despacho de um pedido de entrega própria.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-import { dispatchOrder } from '../../lib/ifood.js';
+import { dispatchOrder, readyToPickupOrder } from '../../lib/ifood.js';
 
 export default async function handler(req, res) {
   const startedAt = Date.now();
@@ -43,15 +43,18 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Apenas administradores podem despachar pedidos' });
   }
 
-  const { orderId } = req.body || {};
+  const { orderId, action = 'dispatch' } = req.body || {};
   if (!orderId) {
     console.warn('=== [API /api/ifood/dispatch] orderId AUSENTE ===');
     return res.status(400).json({ error: 'orderId é obrigatório' });
   }
+  if (!['ready', 'dispatch'].includes(action)) {
+    return res.status(400).json({ error: 'action deve ser ready ou dispatch' });
+  }
 
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .select('id, ifood_order_id, status, driver_id, ifood_dispatched_at')
+    .select('id, ifood_order_id, display_id, status, driver_id, ifood_dispatched_at')
     .eq('id', orderId)
     .single();
   if (orderError || !order) {
@@ -68,6 +71,85 @@ export default async function handler(req, res) {
     currentStatus: order.status,
     hasAssignedDriver: Boolean(order.driver_id)
   });
+
+  if (action === 'ready') {
+    if (order.status !== 'em_preparo') {
+      return res.status(409).json({ error: 'O pedido precisa estar em preparo antes de ser marcado como pronto' });
+    }
+
+    console.log('=== [API /api/ifood/dispatch] INFORMANDO PEDIDO PRONTO AO IFOOD ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id,
+      displayId: order.display_id
+    });
+
+    try {
+      const ifoodRes = await readyToPickupOrder(order.ifood_order_id);
+      console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (readyToPickup) ===', {
+        orderId: order.id,
+        ifoodOrderId: order.ifood_order_id,
+        status: ifoodRes.status,
+        ok: ifoodRes.ok
+      });
+      if (!ifoodRes.ok) {
+        const text = await ifoodRes.text();
+        return res.status(502).json({ error: `iFood recusou a atualização para pronto: ${text}` });
+      }
+    } catch (err) {
+      console.error('=== [API /api/ifood/dispatch] EXCEÇÃO AO INFORMAR PEDIDO PRONTO ===', {
+        orderId: order.id,
+        ifoodOrderId: order.ifood_order_id,
+        error: err.message
+      });
+      return res.status(502).json({ error: 'Erro ao informar ao iFood que o pedido está pronto' });
+    }
+
+    const { data: updatedOrder, error: updateError } = await supabaseAdmin
+      .from('orders')
+      .update({ status: 'pronto' })
+      .eq('id', order.id)
+      .eq('status', 'em_preparo')
+      .select('id')
+      .maybeSingle();
+    if (updateError) {
+      console.error('=== [API /api/ifood/dispatch] IFOOD ACEITOU, MAS SUPABASE FALHOU AO MARCAR PRONTO ===', {
+        orderId: order.id,
+        ifoodOrderId: order.ifood_order_id,
+        error: updateError.message,
+        code: updateError.code,
+        details: updateError.details
+      });
+      return res.status(500).json({ error: 'iFood marcou o pedido como pronto, mas o sistema não conseguiu atualizar o status local' });
+    }
+    if (!updatedOrder) {
+      const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
+        .from('orders')
+        .select('status')
+        .eq('id', order.id)
+        .single();
+      if (latestOrderError) {
+        console.error('=== [API /api/ifood/dispatch] FALHA AO VERIFICAR STATUS APÓS MARCAR PRONTO ===', {
+          orderId: order.id,
+          ifoodOrderId: order.ifood_order_id,
+          error: latestOrderError.message,
+          code: latestOrderError.code
+        });
+        return res.status(500).json({ error: 'iFood marcou o pedido como pronto, mas não foi possível verificar o status local' });
+      }
+      if (!['pronto', 'em_rota', 'entregue'].includes(latestOrder.status)) {
+        return res.status(409).json({ error: 'iFood marcou o pedido como pronto, mas o status local mudou. Atualize a tela.' });
+      }
+    }
+
+    console.log('=== [API /api/ifood/dispatch] PEDIDO PRONTO ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id,
+      status: updatedOrder ? 'pronto' : 'já avançado',
+      durationMs: Date.now() - startedAt
+    });
+    return res.status(200).json({ ok: true });
+  }
+
   if (order.status !== 'pronto') {
     console.warn('=== [API /api/ifood/dispatch] STATUS IMPEDE DESPACHO ===', {
       orderId: order.id,
