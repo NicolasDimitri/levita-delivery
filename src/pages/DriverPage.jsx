@@ -101,6 +101,31 @@ export default function DriverPage() {
     { id: 'saque',      label: 'Carteira' },
   ];
 
+  const routeStops = orders.map((order) => {
+    const address = [
+      order.street && `${order.street}, ${order.street_number || ''}`,
+      order.neighborhood,
+      order.complement,
+      order.reference && `(${order.reference})`,
+    ].filter(Boolean).join(' - ');
+
+    return { address };
+  });
+  const ordersWithoutAddress = routeStops.filter((stop) => !stop.address).length;
+  const validRouteStops = routeStops.filter((stop) => stop.address);
+  const mapsRouteUrl = (() => {
+    if (!validRouteStops.length || ordersWithoutAddress) return '';
+    const params = new URLSearchParams({
+      api: '1',
+      destination: validRouteStops[validRouteStops.length - 1].address,
+      travelmode: 'driving',
+    });
+    if (validRouteStops.length > 1) {
+      params.set('waypoints', validRouteStops.slice(0, -1).map((stop) => stop.address).join('|'));
+    }
+    return `https://www.google.com/maps/dir/?${params.toString()}`;
+  })();
+
   return (
     <div className="min-h-screen bg-gray-50 pb-8">
       {/* cabeçalho */}
@@ -148,6 +173,36 @@ export default function DriverPage() {
             {!loading && orders.length === 0 && (
               <div className="mt-8 rounded-2xl border border-dashed border-gray-300 p-10 text-center">
                 <p className="text-sm text-gray-400">Nenhuma entrega em rota agora.</p>
+              </div>
+            )}
+            {orders.length > 0 && (
+              <div className="mb-3">
+                {mapsRouteUrl ? (
+                  <a
+                    href={mapsRouteUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
+                  >
+                    Abrir rota no Google Maps ({validRouteStops.length} paradas)
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full rounded-lg bg-gray-300 py-2.5 text-sm font-semibold text-gray-600"
+                  >
+                    Rota indisponível: verifique os endereços
+                  </button>
+                )}
+                <p className="mt-1 text-center text-xs text-gray-500">
+                  Início na sua localização atual; paradas na ordem das entregas.
+                </p>
+                {ordersWithoutAddress > 0 && (
+                  <p className="mt-1 text-center text-xs text-red-600">
+                    {ordersWithoutAddress} entrega(s) sem endereço não podem ser incluídas.
+                  </p>
+                )}
               </div>
             )}
             <div className="space-y-3">
