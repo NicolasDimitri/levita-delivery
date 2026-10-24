@@ -1,7 +1,5 @@
 // api/ifood/store-hours-status.js
-// Verifica se as 3 lojas têm o turno de HOJE configurado no horário de
-// funcionamento. Usado pra decidir se o botão mostra "Aberto" (verde) ou
-// "Fechado" (vermelho) na tela de admin.
+// Verifica se todas as lojas estão abertas para decidir o estado do botão de admin.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import {
@@ -54,14 +52,11 @@ export default async function handler(req, res) {
     try {
       const interruptions = await getInterruptions(merchantId);
       const hasActiveInterruption = interruptions.some((interruption) => isInterruptionActive(interruption));
-      const hasManualInterruption = interruptions.some(
-        (interruption) => interruption.description === 'Levita Delivery - fechamento manual'
-      );
 
       // Uma interrupção ativa já é suficiente para considerar a loja fechada.
       // Além de ser a fonte mais direta, isso evita que uma falha transitória
       // no endpoint de horários faça o botão oscilar para um estado incorreto.
-      if (hasActiveInterruption || hasManualInterruption) {
+      if (hasActiveInterruption) {
         stores.push({ merchantId, open: false });
         continue;
       }
@@ -79,9 +74,10 @@ export default async function handler(req, res) {
     }
   }
 
-  // só consideramos "tudo aberto" se TODAS as lojas tiverem hoje configurado
-  const allOpen = stores.length > 0 && stores.every((s) => s.open === true);
+  // Uma falha na consulta não significa que a loja esteja fechada.
+  const hasUnknownStatus = stores.length === 0 || stores.some((store) => store.open === null);
+  const allOpen = hasUnknownStatus ? null : stores.every((store) => store.open === true);
 
-  console.log('=== [API /api/ifood/store-hours-status] SUCESSO — respondendo ===', { today, allOpen, storeCount: stores.length });
+  console.log('=== [API /api/ifood/store-hours-status] RESPONDENDO ===', { today, allOpen, storeCount: stores.length });
   return res.status(200).json({ today, allOpen, stores });
 }

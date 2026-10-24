@@ -31,6 +31,9 @@ async function waitForStoreStatus(expectedOpen) {
   while (Date.now() < deadline) {
     try {
       const result = await callApi('/api/ifood/store-hours-status', { method: 'GET' });
+      if (result.allOpen === null) {
+        throw new Error('Não foi possível consultar o status de todas as lojas no iFood.');
+      }
       if (result.allOpen === expectedOpen) {
         return result.allOpen;
       }
@@ -56,7 +59,13 @@ export default function StoreStatusToggle() {
     try {
       const result = await callApi('/api/ifood/store-hours-status', { method: 'GET' });
       setOpen(result.allOpen);
+      setError(
+        result.allOpen === null
+          ? 'Não foi possível consultar o status de todas as lojas no iFood.'
+          : ''
+      );
     } catch (err) {
+      setOpen(null);
       setError(err.message);
     }
   }
@@ -86,10 +95,14 @@ export default function StoreStatusToggle() {
         onClick={handleToggle}
         disabled={loading || open === null}
         className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-60 ${
-          open ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+          open === null
+            ? 'bg-gray-500'
+            : open
+              ? 'bg-green-600 hover:bg-green-700'
+              : 'bg-red-600 hover:bg-red-700'
         }`}
       >
-        {loading ? 'Atualizando...' : open === null ? 'Verificando...' : open ? 'Aberto' : 'Fechado'}
+        {loading ? 'Atualizando...' : open === null ? 'Status indisponível' : open ? 'Aberto' : 'Fechado'}
       </button>
       {error && <p className="max-w-[220px] text-right text-xs text-red-600">{error}</p>}
     </div>
