@@ -21,8 +21,8 @@ Vá em **Project Settings → API**. Você vai precisar de 3 valores:
 
 | Onde aparece no Supabase | Nome na env var | Vai pra onde |
 |---|---|---|
-| Project URL | `VITE_SUPABASE_URL` | frontend + funções serverless |
-| `anon` `public` key | `VITE_SUPABASE_ANON_KEY` | frontend (é segura, protegida pelo RLS) |
+| Project URL | `SUPABASE_URL` | frontend + funções serverless |
+| `anon` `public` key | `SUPABASE_ANON_KEY` | frontend (é segura, protegida pelo RLS) |
 | `service_role` `secret` key | `SUPABASE_SERVICE_ROLE_KEY` | **só** funções serverless (`/api`) — nunca no frontend |
 
 ⚠️ A `service_role` key ignora todas as regras de RLS. Nunca coloque ela em uma variável que comece com `VITE_` (isso a exporia no navegador).
@@ -111,8 +111,8 @@ Anote os 3 `merchantId` retornados → variável `IFOOD_MERCHANT_IDS` (separados
 1. Suba este projeto num repositório no GitHub
 2. Em [vercel.com](https://vercel.com) → **Add New → Project** → importe o repositório
 3. Em **Environment Variables**, adicione todas as variáveis do `.env.example`:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `IFOOD_CLIENT_ID`
    - `IFOOD_CLIENT_SECRET`

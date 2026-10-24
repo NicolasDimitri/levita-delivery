@@ -17,11 +17,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(__dirname, '../.env.local') });
 config({ path: resolve(__dirname, '../.env') });
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !serviceRoleKey) {
-  console.error('❌ Faltam variáveis de ambiente: VITE_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY');
+  console.error('❌ Faltam variáveis de ambiente: SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY');
   process.exit(1);
 }
 
