@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import DeliveryCard from '../components/DeliveryCard';
+import { buildGoogleMapsRouteBatches, getGoogleMapsDestination } from '../../lib/deliveryAddress';
 
 export default function DriverPage() {
   const { signOut, profile, session } = useAuth();
@@ -101,30 +102,15 @@ export default function DriverPage() {
     { id: 'saque',      label: 'Carteira' },
   ];
 
-  const routeStops = orders.map((order) => {
-    const address = [
-      order.street && `${order.street}, ${order.street_number || ''}`,
-      order.neighborhood,
-      order.complement,
-      order.reference && `(${order.reference})`,
-    ].filter(Boolean).join(' - ');
-
-    return { address };
-  });
-  const ordersWithoutAddress = routeStops.filter((stop) => !stop.address).length;
-  const validRouteStops = routeStops.filter((stop) => stop.address);
-  const mapsRouteUrl = (() => {
-    if (!validRouteStops.length || ordersWithoutAddress) return '';
-    const params = new URLSearchParams({
-      api: '1',
-      destination: validRouteStops[validRouteStops.length - 1].address,
-      travelmode: 'driving',
-    });
-    if (validRouteStops.length > 1) {
-      params.set('waypoints', validRouteStops.slice(0, -1).map((stop) => stop.address).join('|'));
-    }
-    return `https://www.google.com/maps/dir/?${params.toString()}`;
-  })();
+  const routeStops = orders.map((order) => ({
+    order,
+    ...getGoogleMapsDestination(order)
+  }));
+  const ordersWithoutAddress = routeStops.filter((stop) => !stop.destination).length;
+  const approximateStops = routeStops.filter((stop) => stop.destination && stop.approximate).length;
+  const route = ordersWithoutAddress
+    ? { batches: [], failedIndex: -1 }
+    : buildGoogleMapsRouteBatches(routeStops.map((stop) => stop.destination));
 
   return (
     <div className="min-h-screen bg-gray-50 pb-8">
@@ -177,15 +163,22 @@ export default function DriverPage() {
             )}
             {orders.length > 0 && (
               <div className="mb-3">
-                {mapsRouteUrl ? (
-                  <a
-                    href={mapsRouteUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
-                  >
-                    Abrir rota no Google Maps ({validRouteStops.length} paradas)
-                  </a>
+                {route.batches.length > 0 && route.failedIndex < 0 ? (
+                  <div className="space-y-2">
+                    {route.batches.map((batch, index) => (
+                      <a
+                        key={`${index}-${batch.url}`}
+                        href={batch.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
+                      >
+                        Abrir rota no Google Maps
+                        {route.batches.length > 1 ? ` (${index + 1}/${route.batches.length})` : ''}
+                        {' '}· {batch.stops.length} paradas
+                      </a>
+                    ))}
+                  </div>
                 ) : (
                   <button
                     type="button"
@@ -200,7 +193,17 @@ export default function DriverPage() {
                 </p>
                 {ordersWithoutAddress > 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
-                    {ordersWithoutAddress} entrega(s) sem endereço não podem ser incluídas.
+                    {ordersWithoutAddress} entrega(s) sem destino confiável; confira o endereço antes de montar a rota.
+                  </p>
+                )}
+                {approximateStops > 0 && (
+                  <p className="mt-1 text-center text-xs text-amber-700">
+                    {approximateStops} endereço(s) sem número válido; confirme a localização com o cliente.
+                  </p>
+                )}
+                {route.failedIndex >= 0 && (
+                  <p className="mt-1 text-center text-xs text-red-600">
+                    Não foi possível criar a rota a partir da parada {route.failedIndex + 1}; confira o tamanho ou conteúdo do endereço.
                   </p>
                 )}
               </div>
