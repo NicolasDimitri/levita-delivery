@@ -24,12 +24,12 @@ export default function DeliveryCard({ order, onChanged }) {
 
   async function handleCopyAddress() {
     try {
-      await navigator.clipboard.writeText(fullAddress);
+      await navigator.clipboard.writeText(streetAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // navigator.clipboard pode falhar em http (não-https) ou navegadores antigos
-      alert('Não foi possível copiar automaticamente. Endereço: ' + fullAddress);
+      alert('Não foi possível copiar automaticamente. Endereço: ' + streetAddress);
     }
   }
 
