@@ -63,6 +63,11 @@ create table public.orders (
   neighborhood text,
   complement text,
   reference text,
+  city text,
+  state text,
+  postal_code text,
+  latitude numeric,
+  longitude numeric,
 
   -- pagamento
   payment_category text not null check (payment_category in ('online', 'dinheiro', 'debito', 'credito')),

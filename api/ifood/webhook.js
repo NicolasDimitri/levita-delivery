@@ -8,6 +8,7 @@
 import crypto from 'crypto';
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { getOrderDetails, classifyPayment } from '../../lib/ifood.js';
+import { getDeliveryCoordinates } from '../../lib/deliveryAddress.js';
 
 export const config = {
   api: { bodyParser: false }
@@ -299,6 +300,7 @@ async function handlePlaced(event) {
   const customer = order.customer || {};
   const delivery = order.delivery || {};
   const address = delivery.deliveryAddress || {};
+  const coordinates = getDeliveryCoordinates(address, delivery);
 
   if (customer.id) {
     const { error: customerError } = await supabaseAdmin
@@ -323,6 +325,11 @@ async function handlePlaced(event) {
       neighborhood: address.neighborhood,
       complement: address.complement,
       reference: address.reference,
+      city: address.city,
+      state: address.state,
+      postal_code: address.postalCode,
+      latitude: coordinates?.latitude ?? null,
+      longitude: coordinates?.longitude ?? null,
       payment_category: paymentCategory,
       payment_raw: payments,
       total_value: order.total?.orderAmount ?? 0,

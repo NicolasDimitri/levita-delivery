@@ -8,14 +8,19 @@ export default function DeliveryCard({ order, onChanged }) {
   const [copied, setCopied] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
-  const fullAddress = [
-    order.street && `${order.street}, ${order.street_number || ''}`,
+  const streetAddress = [order.street, order.street_number].filter(Boolean).join(', ');
+  const locality = [
     order.neighborhood,
-    order.complement,
-    order.reference && `(${order.reference})`
-  ]
-    .filter(Boolean)
-    .join(' - ');
+    [order.city, order.state].filter(Boolean).join(' - '),
+    order.postal_code && `CEP ${order.postal_code}`
+  ].filter(Boolean).join(', ');
+  const addressLines = [
+    streetAddress,
+    locality,
+    order.complement && `Complemento: ${order.complement}`,
+    order.reference && `Referência: ${order.reference}`
+  ].filter(Boolean);
+  const fullAddress = addressLines.join('\n');
 
   async function handleCopyAddress() {
     try {
@@ -37,7 +42,7 @@ export default function DeliveryCard({ order, onChanged }) {
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
           <p className="font-semibold">{order.customer_name}</p>
-          <p className="text-sm text-gray-600">{fullAddress}</p>
+          <p className="whitespace-pre-line text-sm text-gray-600">{fullAddress || 'Endereço não informado'}</p>
         </div>
         <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
           order.status === 'em_rota'
