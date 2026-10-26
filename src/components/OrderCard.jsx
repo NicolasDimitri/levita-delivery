@@ -36,6 +36,15 @@ export default function OrderCard({ order, drivers, onChanged }) {
 
   const accept   = () => run('accept',  () => call('/api/ifood/confirm',  { body: { orderId: order.id } }));
   const dispatch = () => run('dispatch', () => call('/api/ifood/dispatch', { body: { orderId: order.id } }));
+  const reconcileDispatch = () => {
+    if (window.confirm(
+      'Confirme que este pedido já aparece como despachado ou em rota no Gestor de Pedidos do iFood. Esta ação só atualizará o status nesta aplicação.'
+    )) {
+      run('reconcile', () => call('/api/ifood/dispatch', {
+        body: { orderId: order.id, action: 'reconcile-dispatch' }
+      }));
+    }
+  };
   const loadCancellationReasons = () => run('reasons', async () => {
     const result = await call(`/api/ifood/cancel-reasons?orderId=${encodeURIComponent(order.id)}`, { method: 'GET' });
     setCancellationReasons(result.reasons || []);
@@ -179,12 +188,21 @@ export default function OrderCard({ order, drivers, onChanged }) {
             <p className="text-xs text-amber-700">Salve a nova atribuição antes de despachar.</p>
           )}
           {order.ifood_dispatched_at && (
-            <p className="text-xs text-amber-700">Despacho solicitado ao iFood; aguardando confirmação.</p>
+            <p className="text-xs text-amber-700">
+              Despacho solicitado ao iFood; aguardando confirmação.
+            </p>
           )}
-          <Button variant="blue" size="lg" onClick={dispatch}
-            disabled={loading('dispatch') || !order.driver_id || selectedDriver !== order.driver_id || Boolean(order.ifood_dispatched_at)}>
-            {loading('dispatch') ? 'Despachando...' : order.ifood_dispatched_at ? 'Despacho solicitado' : 'Despachar pro iFood'}
-          </Button>
+          {order.ifood_dispatched_at ? (
+            <Button variant="blue" size="lg" onClick={reconcileDispatch}
+              disabled={loading('reconcile') || !order.driver_id}>
+              {loading('reconcile') ? 'Sincronizando...' : 'Sincronizar após confirmar no iFood'}
+            </Button>
+          ) : (
+            <Button variant="blue" size="lg" onClick={() => dispatch()}
+              disabled={loading('dispatch') || !order.driver_id || selectedDriver !== order.driver_id}>
+              {loading('dispatch') ? 'Despachando...' : 'Despachar pro iFood'}
+            </Button>
+          )}
         </div>
       )}
 

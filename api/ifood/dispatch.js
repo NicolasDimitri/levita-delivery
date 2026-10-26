@@ -48,8 +48,8 @@ export default async function handler(req, res) {
     console.warn('=== [API /api/ifood/dispatch] orderId AUSENTE ===');
     return res.status(400).json({ error: 'orderId é obrigatório' });
   }
-  if (!['ready', 'dispatch'].includes(action)) {
-    return res.status(400).json({ error: 'action deve ser ready ou dispatch' });
+  if (!['ready', 'dispatch', 'reconcile-dispatch'].includes(action)) {
+    return res.status(400).json({ error: 'action inválida' });
   }
 
   const { data: order, error: orderError } = await supabaseAdmin
@@ -71,6 +71,45 @@ export default async function handler(req, res) {
     currentStatus: order.status,
     hasAssignedDriver: Boolean(order.driver_id)
   });
+
+  if (action === 'reconcile-dispatch') {
+    if (order.status !== 'pronto' || !order.ifood_dispatched_at) {
+      return res.status(409).json({
+        error: 'Só é possível sincronizar um despacho pendente de um pedido pronto.'
+      });
+    }
+
+    const { data: updatedOrder, error: reconcileError } = await supabaseAdmin
+      .from('orders')
+      .update({ status: 'em_rota' })
+      .eq('id', order.id)
+      .eq('status', 'pronto')
+      .not('ifood_dispatched_at', 'is', null)
+      .select('id')
+      .maybeSingle();
+
+    if (reconcileError) {
+      console.error('=== [API /api/ifood/dispatch] FALHA AO SINCRONIZAR DESPACHO CONFIRMADO ===', {
+        orderId: order.id,
+        ifoodOrderId: order.ifood_order_id,
+        error: reconcileError.message,
+        code: reconcileError.code
+      });
+      return res.status(500).json({ error: 'Não foi possível sincronizar o despacho no sistema' });
+    }
+
+    if (!updatedOrder) {
+      return res.status(409).json({
+        error: 'O pedido mudou de status. Atualize a tela antes de sincronizar.'
+      });
+    }
+
+    console.log('=== [API /api/ifood/dispatch] DESPACHO SINCRONIZADO APÓS CONFIRMAÇÃO MANUAL ===', {
+      orderId: order.id,
+      ifoodOrderId: order.ifood_order_id
+    });
+    return res.status(200).json({ ok: true, status: 'em_rota', reconciled: true });
+  }
 
   if (action === 'ready') {
     if (order.status !== 'em_preparo') {

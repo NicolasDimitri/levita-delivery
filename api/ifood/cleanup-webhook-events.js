@@ -30,6 +30,27 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   }
 
-  console.log(`Limpeza de webhook_events: ${count ?? 0} linha(s) removida(s), anteriores a ${cutoff}`);
-  return res.status(200).json({ removed: count ?? 0, cutoff });
+  const attemptsCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { error: attemptsError, count: attemptsRemoved } = await supabaseAdmin
+    .from('ifood_webhook_attempts')
+    .delete({ count: 'exact' })
+    .lt('received_at', attemptsCutoff);
+
+  if (attemptsError) {
+    console.error('Erro ao limpar ifood_webhook_attempts', attemptsError);
+    return res.status(500).json({ error: attemptsError.message });
+  }
+
+  console.log('Limpeza dos registros de webhook concluída', {
+    dedupeRemoved: count ?? 0,
+    dedupeCutoff: cutoff,
+    attemptsRemoved: attemptsRemoved ?? 0,
+    attemptsCutoff
+  });
+  return res.status(200).json({
+    dedupeRemoved: count ?? 0,
+    dedupeCutoff: cutoff,
+    attemptsRemoved: attemptsRemoved ?? 0,
+    attemptsCutoff
+  });
 }

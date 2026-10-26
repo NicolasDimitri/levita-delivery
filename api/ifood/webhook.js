@@ -89,9 +89,12 @@ export default async function handler(req, res) {
         code: event?.code || null,
         orderId: event?.orderId || null
       });
-      await processEvent(event);
+      await recordWebhookAttempt(event, 'received');
+      const outcome = await processEvent(event);
+      await recordWebhookAttempt(event, outcome);
     } catch (err) {
       processingFailed = true;
+      await recordWebhookAttempt(event, 'failed', err.message);
       console.error('=== [WEBHOOK] FALHA AO PROCESSAR EVENTO ===', {
         eventId: event?.id || null,
         code: event?.code || null,
@@ -127,7 +130,7 @@ async function processEvent(event) {
   if (lookupError) throw lookupError;
   if (already) {
     console.log('=== [WEBHOOK] evento duplicado ignorado ===', { eventId: event.id, code: event.code });
-    return;
+    return 'duplicate';
   }
 
   switch (String(event.code || '').toUpperCase()) {
@@ -177,6 +180,30 @@ async function processEvent(event) {
     orderId: event.orderId || null,
     duplicateRace: insertError?.code === '23505'
   });
+  return 'processed';
+}
+
+async function recordWebhookAttempt(event, outcome, errorMessage = null) {
+  const { error } = await supabaseAdmin
+    .from('ifood_webhook_attempts')
+    .insert({
+      event_id: typeof event?.id === 'string' ? event.id : null,
+      order_id: typeof event?.orderId === 'string' ? event.orderId : null,
+      code: typeof event?.code === 'string' ? event.code : null,
+      outcome,
+      error_message: errorMessage ? String(errorMessage).slice(0, 500) : null
+    });
+
+  if (error) {
+    console.error('=== [WEBHOOK] FALHA AO REGISTRAR TENTATIVA NO BANCO ===', {
+      eventId: event?.id || null,
+      code: event?.code || null,
+      orderId: event?.orderId || null,
+      outcome,
+      error: error.message,
+      codeError: error.code || null
+    });
+  }
 }
 
 async function updateOrderStatusFromEvent(event, targetStatus, allowedStatuses) {
