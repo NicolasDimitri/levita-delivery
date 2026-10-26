@@ -198,7 +198,7 @@ export default function DriverPage() {
                 )}
                 {approximateStops > 0 && (
                   <p className="mt-1 text-center text-xs text-amber-700">
-                    {approximateStops} endereço(s) sem número válido; confirme a localização com o cliente.
+                    {approximateStops} endereço(s) incompleto(s) ou sem número; confirme a localização com o cliente.
                   </p>
                 )}
                 {route.failedIndex >= 0 && (
