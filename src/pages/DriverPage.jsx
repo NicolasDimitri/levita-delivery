@@ -3,7 +3,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import DeliveryCard from '../components/DeliveryCard';
-import { buildGoogleMapsRouteBatches, getGoogleMapsDestination } from '../../lib/deliveryAddress';
+import {
+  buildGoogleMapsRouteBatches,
+  getGoogleMapsDestination,
+  STORE_RETURN_ADDRESS
+} from '../../lib/deliveryAddress';
 
 export default function DriverPage() {
   const { signOut, profile, session } = useAuth();
@@ -121,7 +125,10 @@ export default function DriverPage() {
   const ordersWithoutAddress = routeStops.filter((stop) => !stop.destination).length;
   const route = ordersWithoutAddress
     ? { batches: [], failedIndex: -1 }
-    : buildGoogleMapsRouteBatches(routeStops.map((stop) => stop.destination));
+    : buildGoogleMapsRouteBatches([
+      ...routeStops.map((stop) => stop.destination),
+      STORE_RETURN_ADDRESS
+    ]);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-8">
@@ -201,7 +208,7 @@ export default function DriverPage() {
                   </button>
                 )}
                 <p className="mt-1 text-center text-xs text-gray-500">
-                  Início na sua localização atual; paradas na ordem das entregas.
+                  Início na sua localização atual; entregas na ordem e retorno à loja no final.
                 </p>
                 {ordersWithoutAddress > 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
