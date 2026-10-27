@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { getOrderDetails, classifyPayment } from '../../lib/ifood.js';
 import { getDeliveryCoordinates } from '../../lib/deliveryAddress.js';
+import { DRIVER_EARNING_PER_DELIVERY } from '../../lib/driverEarnings.js';
 
 export const config = {
   api: { bodyParser: false }
@@ -473,7 +474,7 @@ async function handleConcluded(event) {
       const { error: historyInsertError } = await supabaseAdmin.from('delivery_history').insert({
         driver_id: order.driver_id,
         order_id: order.id,
-        valor_entrega: order.delivery_fee
+        valor_entrega: DRIVER_EARNING_PER_DELIVERY
       });
       if (historyInsertError) throw historyInsertError;
       console.log('=== [WEBHOOK] histórico de entrega criado ===', {

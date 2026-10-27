@@ -139,9 +139,12 @@ vercel dev
 
 Isso roda frontend + funções serverless juntos localmente.
 
-**Rotas do entregador:** a rota prioriza as coordenadas de destino recebidas no pedido do iFood ou em um link Google Maps válido. Sem coordenadas, usa rua, número válido, bairro, cidade/UF e CEP; complemento e referência são mantidos como instruções visíveis ao entregador, mas não entram na busca do destino. Endereços sem número geram aviso para confirmar a localização. Em bancos existentes, execute `supabase/migration_add_order_delivery_coordinates.sql` no SQL Editor antes de publicar a versão que grava esses campos.
 
 ---
+
+**Rotas do entregador:** use rua e numero; coordenadas nao sao usadas para gerar a rota. Se faltar rua ou o numero for `S/N`, `0` ou estiver vazio, o administrador precisa cadastrar um endereco ou nome do local no aviso do pedido. Esse endereco sera usado na rota e no botao de copia. Em bancos existentes, execute `supabase/migration_add_route_address.sql` no SQL Editor.
+
+**Saldo do entregador:** cada entrega concluida credita R$ 5,00, independentemente da taxa do iFood. Execute `supabase/migration_fix_driver_delivery_earnings.sql` antes de publicar; ela ajusta o historico e habilita atualizacoes em tempo real do saldo.
 
 ## 5. Como testar o fluxo de ponta a ponta
 

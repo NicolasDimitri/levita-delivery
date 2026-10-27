@@ -16,6 +16,7 @@ export default function DriverPage() {
   const [loading, setLoading] = useState(true);
   const [withdrawNote, setWithdrawNote] = useState('');
   const [ordersError, setOrdersError] = useState('');
+  const [balanceError, setBalanceError] = useState('');
 
   const loadOrders = useCallback(async () => {
     const { data, error } = await supabase
@@ -46,20 +47,27 @@ export default function DriverPage() {
   }, [session]);
 
   const loadBalance = useCallback(async () => {
-    const { data: hist } = await supabase
-      .from('delivery_history')
-      .select('valor_entrega')
-      .eq('driver_id', session.user.id);
+    const [{ data: hist, error: historyError }, { data: wdr, error: withdrawalsError }] = await Promise.all([
+      supabase
+        .from('delivery_history')
+        .select('valor_entrega')
+        .eq('driver_id', session.user.id),
+      supabase
+        .from('withdrawals')
+        .select('valor')
+        .eq('driver_id', session.user.id)
+    ]);
+
+    if (historyError || withdrawalsError) {
+      console.error('Não foi possível carregar o saldo do entregador', historyError || withdrawalsError);
+      setBalanceError('Não foi possível atualizar o saldo. Tente atualizar a página.');
+      return;
+    }
 
     const earned = (hist || []).reduce((s, r) => s + Number(r.valor_entrega), 0);
-
-    const { data: wdr } = await supabase
-      .from('withdrawals')
-      .select('valor')
-      .eq('driver_id', session.user.id);
-
     const withdrawn = (wdr || []).reduce((s, r) => s + Number(r.valor), 0);
 
+    setBalanceError('');
     setTotalWithdrawn(withdrawn);
     setBalance(Math.max(0, earned - withdrawn));
   }, [session]);
@@ -82,6 +90,10 @@ export default function DriverPage() {
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'orders', filter: `driver_id=eq.${session.user.id}` },
         () => { loadOrders(); loadBalance(); if (tab === 'finalizadas') loadFinishedOrders(); }
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'delivery_history', filter: `driver_id=eq.${session.user.id}` },
+        () => loadBalance()
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'withdrawals', filter: `driver_id=eq.${session.user.id}` },
@@ -107,7 +119,6 @@ export default function DriverPage() {
     ...getGoogleMapsDestination(order)
   }));
   const ordersWithoutAddress = routeStops.filter((stop) => !stop.destination).length;
-  const approximateStops = routeStops.filter((stop) => stop.destination && stop.approximate).length;
   const route = ordersWithoutAddress
     ? { batches: [], failedIndex: -1 }
     : buildGoogleMapsRouteBatches(routeStops.map((stop) => stop.destination));
@@ -125,6 +136,7 @@ export default function DriverPage() {
             <div className="text-right">
               <p className="text-xs text-gray-400">Saldo</p>
               <p className="text-sm font-bold text-green-700">R$ {balance.toFixed(2)}</p>
+              {balanceError && <p className="max-w-32 text-xs text-red-600">{balanceError}</p>}
             </div>
             <button onClick={signOut} className="text-xs text-gray-400 hover:text-gray-700">Sair</button>
           </div>
@@ -193,12 +205,7 @@ export default function DriverPage() {
                 </p>
                 {ordersWithoutAddress > 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
-                    {ordersWithoutAddress} entrega(s) sem destino confiável; confira o endereço antes de montar a rota.
-                  </p>
-                )}
-                {approximateStops > 0 && (
-                  <p className="mt-1 text-center text-xs text-amber-700">
-                    {approximateStops} endereço(s) incompleto(s) ou sem número; confirme a localização com o cliente.
+                    {ordersWithoutAddress} entrega(s) aguardando endereço correto cadastrado pelo administrador.
                   </p>
                 )}
                 {route.failedIndex >= 0 && (
@@ -251,6 +258,7 @@ export default function DriverPage() {
               <p className="text-xs font-medium uppercase tracking-wide opacity-80">Saldo disponível</p>
               <p className="mt-1 text-4xl font-bold">R$ {balance.toFixed(2)}</p>
               <p className="mt-1 text-xs opacity-70">Total sacado: R$ {totalWithdrawn.toFixed(2)}</p>
+              {balanceError && <p className="mt-2 text-sm text-white">{balanceError}</p>}
             </div>
 
             {/* instrução */}

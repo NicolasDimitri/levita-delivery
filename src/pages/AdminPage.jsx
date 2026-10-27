@@ -30,6 +30,7 @@ export default function AdminPage() {
   const [driverBalances, setDriverBalances] = useState({});
   const [loadingWithdraw, setLoadingWithdraw] = useState(null);
   const [withdrawError, setWithdrawError] = useState('');
+  const [balanceError, setBalanceError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const loadOrders = useCallback(async () => {
@@ -57,16 +58,22 @@ export default function AdminPage() {
   const loadDriverBalances = useCallback(async () => {
     if (!drivers.length) return;
     const ids = drivers.map(d => d.id);
-    const [{ data: hist }, { data: wdr }] = await Promise.all([
+    const [{ data: hist, error: historyError }, { data: wdr, error: withdrawalsError }] = await Promise.all([
       supabase.from('delivery_history').select('driver_id, valor_entrega').in('driver_id', ids),
       supabase.from('withdrawals').select('driver_id, valor').in('driver_id', ids),
     ]);
+    if (historyError || withdrawalsError) {
+      console.error('Não foi possível carregar os saldos dos entregadores', historyError || withdrawalsError);
+      setBalanceError('Não foi possível atualizar os saldos dos entregadores.');
+      return;
+    }
     const earned = {};
     const withdrawn = {};
     (hist || []).forEach(r => { earned[r.driver_id] = (earned[r.driver_id] || 0) + Number(r.valor_entrega); });
     (wdr || []).forEach(r => { withdrawn[r.driver_id] = (withdrawn[r.driver_id] || 0) + Number(r.valor); });
     const balances = {};
     ids.forEach(id => { balances[id] = Math.max(0, (earned[id] || 0) - (withdrawn[id] || 0)); });
+    setBalanceError('');
     setDriverBalances(balances);
   }, [drivers]);
 
@@ -79,9 +86,13 @@ export default function AdminPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
         loadOrders();
         if (tab === 'finalizados') loadFinalOrders();
-      }).subscribe();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_history' }, () => {
+        if (tab === 'entregadores') loadDriverBalances();
+      })
+      .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [loadOrders, loadFinalOrders, tab]);
+  }, [loadOrders, loadFinalOrders, loadDriverBalances, tab]);
 
   async function registerWithdrawal(driver) {
     const balance = driverBalances[driver.id] || 0;
@@ -157,6 +168,7 @@ export default function AdminPage() {
         {tab === 'entregadores' && (
           <div className="max-w-lg space-y-3">
             <ErrorMsg message={withdrawError} />
+            <ErrorMsg message={balanceError} />
             {drivers.length === 0 && <EmptyState message="Nenhum entregador cadastrado." />}
             {drivers.map(driver => {
               const balance = driverBalances[driver.id] ?? 0;
