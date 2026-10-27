@@ -142,7 +142,7 @@ Isso roda frontend + funções serverless juntos localmente.
 
 ---
 
-**Rotas do entregador:** use rua e numero; coordenadas nao sao usadas para gerar a rota. Se faltar rua ou o numero for `S/N`, `0` ou estiver vazio, o administrador precisa cadastrar um endereco ou nome do local no aviso do pedido. Esse endereco sera usado na rota e no botao de copia. Em bancos existentes, execute `supabase/migration_add_route_address.sql` no SQL Editor.
+**Rotas do entregador:** use rua e número, e as rotas são abertas no modo de duas rodas do Google Maps (`travelmode=two-wheeler`); coordenadas não são usadas para gerar a rota. A rota termina no endereço da loja, Pedro da Costa Agra, 296, Campina Grande/PB. Se faltar rua ou o número for `S/N`, `0` ou estiver vazio, o administrador precisa cadastrar um endereço ou nome do local no aviso do pedido. Esse endereço será usado na rota e no botão de cópia. Em bancos existentes, execute `supabase/migration_add_route_address.sql` no SQL Editor.
 
 **Saldo do entregador:** cada entrega concluida credita R$ 5,00, independentemente da taxa do iFood. Execute `supabase/migration_fix_driver_delivery_earnings.sql` antes de publicar; ela ajusta o historico e habilita atualizacoes em tempo real do saldo.
 
