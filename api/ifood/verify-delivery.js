@@ -11,6 +11,7 @@
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { verifyDeliveryCode } from '../../lib/ifood.js';
+import { DRIVER_EARNING_PER_DELIVERY } from '../../lib/driverEarnings.js';
 
 export default async function handler(req, res) {
   console.log('=== [API /api/ifood/verify-delivery] REQUISIÇÃO RECEBIDA ===', {
@@ -155,17 +156,15 @@ export default async function handler(req, res) {
         .eq('order_id', order.id)
         .limit(1)
         .maybeSingle();
-      if (historyLookupError) {
-        console.error('Falha ao verificar o histórico da entrega', historyLookupError);
-      } else if (!existingHistory) {
+      if (historyLookupError) throw historyLookupError;
+
+      if (!existingHistory) {
         const { error: historyError } = await supabaseAdmin.from('delivery_history').insert({
           driver_id: order.driver_id,
           order_id: order.id,
-          valor_entrega: order.delivery_fee
+          valor_entrega: DRIVER_EARNING_PER_DELIVERY
         });
-        if (historyError) {
-          console.error('Falha ao registrar histórico de entrega', historyError);
-        }
+        if (historyError) throw historyError;
       }
     }
   } catch (err) {

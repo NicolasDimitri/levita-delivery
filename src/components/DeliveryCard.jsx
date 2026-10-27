@@ -3,11 +3,13 @@ import { useState } from 'react';
 import PaymentBadge from './PaymentBadge';
 import ConfirmDeliveryModal from './ConfirmDeliveryModal';
 import CountdownTimer from './CountdownTimer';
+import { getOrderNavigationAddress } from '../../lib/deliveryAddress';
 
 export default function DeliveryCard({ order, onChanged }) {
   const [copied, setCopied] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
+  const navigationAddress = getOrderNavigationAddress(order);
   const streetAddress = [order.street, order.street_number].filter(Boolean).join(', ');
   const locality = [
     order.neighborhood,
@@ -23,13 +25,14 @@ export default function DeliveryCard({ order, onChanged }) {
   const fullAddress = addressLines.join('\n');
 
   async function handleCopyAddress() {
+    if (!navigationAddress) return;
     try {
-      await navigator.clipboard.writeText(streetAddress);
+      await navigator.clipboard.writeText(navigationAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // navigator.clipboard pode falhar em http (não-https) ou navegadores antigos
-      alert('Não foi possível copiar automaticamente. Endereço: ' + streetAddress);
+      alert('Não foi possível copiar automaticamente. Endereço: ' + navigationAddress);
     }
   }
 
@@ -74,9 +77,10 @@ export default function DeliveryCard({ order, onChanged }) {
       {order.status === 'em_rota' && <div className="flex gap-2">
         <button
           onClick={handleCopyAddress}
+          disabled={!navigationAddress}
           className="flex-1 rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
-          {copied ? 'Endereço copiado!' : 'Copiar endereço'}
+          {copied ? 'Endereço copiado!' : navigationAddress ? 'Copiar endereço' : 'Endereço pendente'}
         </button>
         <button
           onClick={() => setShowModal(true)}
