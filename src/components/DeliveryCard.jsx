@@ -23,6 +23,17 @@ export default function DeliveryCard({ order, onChanged }) {
     order.reference && `Referência: ${order.reference}`
   ].filter(Boolean);
   const fullAddress = addressLines.join('\n');
+  const statusLabel = order.status === 'em_rota'
+    ? 'Em rota'
+    : order.status === 'recebido'
+      ? 'Aguardando aceite/preparo'
+      : order.status === 'em_preparo'
+        ? 'Aguardando ficar pronto'
+        : order.ifood_dispatching_at
+          ? 'Despacho em processamento'
+          : order.ifood_dispatched_at
+            ? 'Aguardando confirmação do iFood'
+            : 'Pronto para despachar';
 
   async function handleCopyAddress() {
     if (!navigationAddress) return;
@@ -45,14 +56,18 @@ export default function DeliveryCard({ order, onChanged }) {
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
           <p className="font-semibold">{order.customer_name}</p>
-          <p className="whitespace-pre-line text-sm text-gray-600">{fullAddress || 'Endereço não informado'}</p>
+          <p className="whitespace-pre-line text-sm text-gray-600">
+            {order.route_address || fullAddress || 'Endereço não informado'}
+          </p>
         </div>
         <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
           order.status === 'em_rota'
             ? 'bg-blue-100 text-blue-700'
-            : 'bg-amber-100 text-amber-700'
+            : order.status === 'pronto'
+              ? 'bg-purple-100 text-purple-700'
+              : 'bg-amber-100 text-amber-700'
         }`}>
-          {order.status === 'em_rota' ? 'Em rota' : 'Aguardando despacho'}
+          {statusLabel}
         </span>
       </div>
 

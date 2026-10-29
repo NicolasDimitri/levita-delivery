@@ -4,6 +4,202 @@
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { dispatchOrder, readyToPickupOrder } from '../../lib/ifood.js';
 
+async function dispatchReadyOrder(orderId, driverId) {
+  const { data: dispatchLock, error: lockError } = await supabaseAdmin.rpc('begin_driver_order_dispatch', {
+    p_order_id: orderId,
+    p_driver_id: driverId
+  });
+
+  if (lockError) {
+    if (lockError.code !== 'P0001') {
+      console.error('Não foi possível bloquear o pedido para despacho', {
+        orderId,
+        error: lockError.message,
+        code: lockError.code
+      });
+    }
+    return {
+      orderId,
+      status: 'failed',
+      error: lockError.code === 'P0001'
+        ? lockError.message
+        : 'Não foi possível iniciar o despacho deste pedido.'
+    };
+  }
+
+  if (!dispatchLock || !['already_requested', 'in_progress', 'started'].includes(dispatchLock.status)) {
+    console.error('Resposta inesperada ao iniciar despacho do pedido', { orderId, dispatchLock });
+    return {
+      orderId,
+      status: 'failed',
+      error: 'Não foi possível iniciar o despacho deste pedido.'
+    };
+  }
+  if (dispatchLock.status === 'started' && !dispatchLock.token) {
+    console.error('Bloqueio de despacho sem token de confirmação', { orderId });
+    return {
+      orderId,
+      status: 'uncertain',
+      error: 'O despacho foi iniciado, mas não foi possível validar a tentativa. Confira o pedido no iFood.'
+    };
+  }
+
+  if (dispatchLock.status === 'already_requested') {
+    return { orderId, status: 'pending', message: 'Despacho já solicitado; aguardando confirmação do iFood.' };
+  }
+  if (dispatchLock.status === 'in_progress') {
+    return { orderId, status: 'pending', message: 'O despacho deste pedido já está sendo processado.' };
+  }
+
+  const dispatchToken = dispatchLock.token;
+  const { data: order, error: orderError } = await supabaseAdmin
+    .from('orders')
+    .select('id, ifood_order_id')
+    .eq('id', orderId)
+    .eq('driver_id', driverId)
+    .single();
+
+  if (orderError || !order) {
+    console.error('Não foi possível validar o pedido após iniciar despacho', {
+      orderId,
+      error: orderError?.message || 'Pedido não encontrado'
+    });
+    return {
+      orderId,
+      status: 'uncertain',
+      error: 'Não foi possível validar o pedido após iniciar o despacho. Confira o iFood antes de tentar novamente.'
+    };
+  }
+
+  try {
+    const ifoodRes = await dispatchOrder(order.ifood_order_id);
+    if (!ifoodRes.ok) {
+      const responseText = await ifoodRes.text();
+      if (ifoodRes.status >= 500 || ifoodRes.status === 408) {
+        console.error('Resposta incerta do iFood ao despachar pedido', {
+          orderId,
+          status: ifoodRes.status
+        });
+        return {
+          orderId,
+          status: 'uncertain',
+          error: 'O iFood retornou uma falha que pode ter ocorrido após o despacho. Confira o pedido no iFood antes de tentar novamente.'
+        };
+      }
+
+      const { data: unlockedOrder, error: unlockError } = await supabaseAdmin
+        .from('orders')
+        .update({ ifood_dispatching_at: null })
+        .eq('id', order.id)
+        .eq('driver_id', driverId)
+        .eq('status', 'pronto')
+        .eq('ifood_dispatching_at', dispatchToken)
+        .is('ifood_dispatched_at', null)
+        .select('id')
+        .maybeSingle();
+
+      if (unlockError || !unlockedOrder) {
+        const { data: latestOrder, error: latestError } = await supabaseAdmin
+          .from('orders')
+          .select('status, ifood_dispatched_at')
+          .eq('id', order.id)
+          .single();
+        if (!latestError && latestOrder?.ifood_dispatched_at &&
+            ['em_rota', 'entregue'].includes(latestOrder.status)) {
+          return { orderId, status: 'dispatched' };
+        }
+
+        console.error('Não foi possível liberar a tentativa recusada pelo iFood', {
+          orderId,
+          error: unlockError?.message || latestError?.message || 'A tentativa mudou antes de ser liberada',
+          code: unlockError?.code || null
+        });
+        return {
+          orderId,
+          status: 'uncertain',
+          error: 'O iFood recusou o despacho, mas não foi possível liberar a tentativa. Confira o pedido antes de tentar novamente.'
+        };
+      }
+
+      return {
+        orderId,
+        status: 'failed',
+        error: `iFood recusou o despacho${responseText ? `: ${responseText}` : '.'}`
+      };
+    }
+
+    const dispatchedAt = new Date().toISOString();
+    const { data: updatedOrder, error: updateError } = await supabaseAdmin
+      .from('orders')
+      .update({
+        ifood_dispatched_at: dispatchedAt,
+        ifood_dispatching_at: null
+      })
+      .eq('id', order.id)
+      .eq('driver_id', driverId)
+      .eq('status', 'pronto')
+      .eq('ifood_dispatching_at', dispatchToken)
+      .select('id')
+      .maybeSingle();
+
+    if (updateError || !updatedOrder) {
+      const { data: latestOrder, error: latestError } = await supabaseAdmin
+        .from('orders')
+        .select('status, ifood_dispatched_at')
+        .eq('id', order.id)
+        .single();
+
+      if (!latestError && latestOrder?.ifood_dispatched_at &&
+          ['em_rota', 'entregue'].includes(latestOrder.status)) {
+        return { orderId, status: 'dispatched' };
+      }
+
+      if (!latestError && ['em_rota', 'entregue'].includes(latestOrder?.status)) {
+        const { data: reconciledOrder, error: reconcileError } = await supabaseAdmin
+          .from('orders')
+          .update({
+            ifood_dispatched_at: latestOrder.ifood_dispatched_at || dispatchedAt,
+            ifood_dispatching_at: null
+          })
+          .eq('id', order.id)
+          .in('status', ['em_rota', 'entregue'])
+          .eq('ifood_dispatching_at', dispatchToken)
+          .select('id')
+          .maybeSingle();
+        if (!reconcileError && reconciledOrder) {
+          return { orderId, status: 'dispatched' };
+        }
+        console.error('Webhook confirmou o despacho, mas não foi possível sincronizar o pedido', {
+          orderId,
+          error: reconcileError?.message || 'O pedido mudou durante a sincronização'
+        });
+      }
+
+      console.error('iFood aceitou o despacho, mas a atualização local precisa de conferência', {
+        orderId,
+        error: updateError?.message || latestError?.message || 'O pedido não foi atualizado'
+      });
+      return {
+        orderId,
+        status: 'uncertain',
+        error: 'iFood aceitou o despacho, mas o sistema precisa de conferência. Verifique o pedido no iFood.'
+      };
+    }
+
+    return { orderId, status: 'dispatched' };
+  } catch (error) {
+    console.error('Resultado do despacho ao iFood é incerto', {
+      orderId,
+      error: error.message
+    });
+    return {
+      orderId,
+      status: 'uncertain',
+      error: 'Não foi possível confirmar a resposta do iFood. Confira o pedido no iFood antes de tentar novamente.'
+    };
+  }
+}
+
 export default async function handler(req, res) {
   const startedAt = Date.now();
   console.log('=== [API /api/ifood/dispatch] REQUISIÇÃO RECEBIDA ===', {
@@ -38,23 +234,47 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Não foi possível validar o perfil do usuário' });
   }
 
-  if (profile?.role !== 'admin') {
-    console.warn('=== [API /api/ifood/dispatch] PERFIL SEM PERMISSÃO ===', { role: profile?.role || null });
-    return res.status(403).json({ error: 'Apenas administradores podem despachar pedidos' });
+  const { orderId, orderIds, action = 'dispatch' } = req.body || {};
+  if (!['ready', 'dispatch', 'reconcile-dispatch', 'release-dispatch'].includes(action)) {
+    return res.status(400).json({ error: 'action inválida' });
   }
 
-  const { orderId, action = 'dispatch' } = req.body || {};
+  if (action === 'dispatch') {
+    if (profile?.role !== 'driver') {
+      console.warn('=== [API /api/ifood/dispatch] PERFIL SEM PERMISSÃO PARA DESPACHAR ===', {
+        role: profile?.role || null
+      });
+      return res.status(403).json({ error: 'Somente o entregador atribuído pode despachar seus pedidos.' });
+    }
+
+    const requestedIds = Array.isArray(orderIds) ? orderIds : orderId ? [orderId] : [];
+    const uniqueIds = [...new Set(requestedIds)];
+    const isUuid = (id) => typeof id === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+
+    if (uniqueIds.length < 1 || uniqueIds.length > 3 || uniqueIds.some((id) => !isUuid(id))) {
+      return res.status(400).json({ error: 'Informe de 1 a 3 pedidos válidos para despachar.' });
+    }
+
+    const results = [];
+    for (const id of uniqueIds) {
+      results.push(await dispatchReadyOrder(id, userData.user.id));
+    }
+    return res.status(200).json({ results });
+  }
+
+  if (profile?.role !== 'admin') {
+    console.warn('=== [API /api/ifood/dispatch] PERFIL SEM PERMISSÃO ===', { role: profile?.role || null });
+    return res.status(403).json({ error: 'Apenas administradores podem atualizar o status de preparo' });
+  }
   if (!orderId) {
     console.warn('=== [API /api/ifood/dispatch] orderId AUSENTE ===');
     return res.status(400).json({ error: 'orderId é obrigatório' });
   }
-  if (!['ready', 'dispatch', 'reconcile-dispatch'].includes(action)) {
-    return res.status(400).json({ error: 'action inválida' });
-  }
 
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .select('id, ifood_order_id, display_id, status, driver_id, ifood_dispatched_at')
+    .select('id, ifood_order_id, display_id, status, driver_id, ifood_dispatched_at, ifood_dispatching_at')
     .eq('id', orderId)
     .single();
   if (orderError || !order) {
@@ -73,18 +293,25 @@ export default async function handler(req, res) {
   });
 
   if (action === 'reconcile-dispatch') {
-    if (order.status !== 'pronto' || !order.ifood_dispatched_at) {
+    if (order.status !== 'pronto' || (!order.ifood_dispatched_at && !order.ifood_dispatching_at)) {
       return res.status(409).json({
         error: 'Só é possível sincronizar um despacho pendente de um pedido pronto.'
       });
     }
 
-    const { data: updatedOrder, error: reconcileError } = await supabaseAdmin
+    let reconcileQuery = supabaseAdmin
       .from('orders')
-      .update({ status: 'em_rota' })
+      .update({
+        status: 'em_rota',
+        ifood_dispatched_at: order.ifood_dispatched_at || order.ifood_dispatching_at,
+        ifood_dispatching_at: null
+      })
       .eq('id', order.id)
-      .eq('status', 'pronto')
-      .not('ifood_dispatched_at', 'is', null)
+      .eq('status', 'pronto');
+    reconcileQuery = order.ifood_dispatched_at
+      ? reconcileQuery.eq('ifood_dispatched_at', order.ifood_dispatched_at)
+      : reconcileQuery.eq('ifood_dispatching_at', order.ifood_dispatching_at);
+    const { data: updatedOrder, error: reconcileError } = await reconcileQuery
       .select('id')
       .maybeSingle();
 
@@ -109,6 +336,33 @@ export default async function handler(req, res) {
       ifoodOrderId: order.ifood_order_id
     });
     return res.status(200).json({ ok: true, status: 'em_rota', reconciled: true });
+  }
+
+  if (action === 'release-dispatch') {
+    if (order.status !== 'pronto' || order.ifood_dispatched_at || !order.ifood_dispatching_at) {
+      return res.status(409).json({
+        error: 'Não há uma tentativa incerta que possa ser liberada para este pedido.'
+      });
+    }
+
+    const { data: releasedOrder, error: releaseError } = await supabaseAdmin
+      .from('orders')
+      .update({ ifood_dispatching_at: null })
+      .eq('id', order.id)
+      .eq('status', 'pronto')
+      .eq('ifood_dispatching_at', order.ifood_dispatching_at)
+      .is('ifood_dispatched_at', null)
+      .select('id')
+      .maybeSingle();
+
+    if (releaseError) {
+      console.error('Falha ao liberar a tentativa de despacho', releaseError);
+      return res.status(500).json({ error: 'Não foi possível liberar a tentativa de despacho.' });
+    }
+    if (!releasedOrder) {
+      return res.status(409).json({ error: 'O pedido mudou. Atualize a tela e tente novamente.' });
+    }
+    return res.status(200).json({ ok: true, released: true });
   }
 
   if (action === 'ready') {
@@ -189,135 +443,5 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
-  if (order.status !== 'pronto') {
-    console.warn('=== [API /api/ifood/dispatch] STATUS IMPEDE DESPACHO ===', {
-      orderId: order.id,
-      ifoodOrderId: order.ifood_order_id,
-      currentStatus: order.status
-    });
-    return res.status(409).json({ error: 'O pedido precisa estar pronto antes do despacho' });
-  }
-  if (!order.driver_id) {
-    console.warn('=== [API /api/ifood/dispatch] PEDIDO SEM ENTREGADOR ===', {
-      orderId: order.id,
-      ifoodOrderId: order.ifood_order_id
-    });
-    return res.status(400).json({ error: 'Atribua um entregador antes de despachar o pedido' });
-  }
-  if (order.ifood_dispatched_at) {
-    console.log('=== [API /api/ifood/dispatch] DESPACHO JÁ SOLICITADO; AGUARDANDO EVENTO DSP ===', {
-      orderId: order.id,
-      ifoodOrderId: order.ifood_order_id,
-      dispatchedAt: order.ifood_dispatched_at
-    });
-    return res.status(200).json({ ok: true, pending: true });
-  }
-  const { data: assignedDriver, error: assignedDriverError } = await supabaseAdmin
-    .from('profiles')
-    .select('id')
-    .eq('id', order.driver_id)
-    .eq('role', 'driver')
-    .single();
-  if (assignedDriverError || !assignedDriver) {
-    console.error('=== [API /api/ifood/dispatch] ENTREGADOR ATRIBUÍDO INVÁLIDO ===', {
-      orderId: order.id,
-      ifoodOrderId: order.ifood_order_id,
-      error: assignedDriverError?.message || null,
-      code: assignedDriverError?.code || null
-    });
-    return res.status(409).json({ error: 'O pedido não está atribuído a um entregador válido' });
-  }
-
-  console.log('=== [API /api/ifood/dispatch] CHAMANDO DISPATCH (MERCHANT) ===', {
-    orderId: order.id,
-    ifoodOrderId: order.ifood_order_id
-  });
-  try {
-    const ifoodRes = await dispatchOrder(order.ifood_order_id);
-    console.log('=== [API /api/ifood/dispatch] RESPOSTA DO IFOOD (dispatch) ===', {
-      status: ifoodRes.status,
-      ok: ifoodRes.ok
-    });
-    if (!ifoodRes.ok) {
-      const text = await ifoodRes.text();
-      let errorDetails = { responseLength: text.length };
-      try {
-        const parsed = JSON.parse(text);
-        errorDetails = {
-          responseLength: text.length,
-          errorType: parsed.errorType || parsed.type || null,
-          code: parsed.code || null,
-          message: parsed.message || parsed.description || null
-        };
-      } catch {
-        // Avoid logging arbitrary response bodies that could contain customer data.
-      }
-      console.error('=== [API /api/ifood/dispatch] IFOOD RECUSOU O DESPACHO ===', {
-        orderId: order.id,
-        ifoodOrderId: order.ifood_order_id,
-        status: ifoodRes.status,
-        ...errorDetails
-      });
-      return res.status(502).json({ error: `iFood recusou o despacho: ${text}` });
-    }
-  } catch (err) {
-    console.error('=== [API /api/ifood/dispatch] EXCEÇÃO AO CHAMAR IFOOD ===', {
-      orderId: order.id,
-      ifoodOrderId: order.ifood_order_id,
-      durationMs: Date.now() - startedAt,
-      error: err.message
-    });
-    return res.status(502).json({ error: 'Erro ao despachar pedido no iFood' });
-  }
-
-  const { data: updatedOrder, error: updateError } = await supabaseAdmin
-    .from('orders')
-    .update({ ifood_dispatched_at: new Date().toISOString() })
-    .eq('id', order.id)
-    .eq('driver_id', order.driver_id)
-    .select('id')
-    .maybeSingle();
-  if (updateError) {
-    console.error('=== [API /api/ifood/dispatch] IFOOD ACEITOU, MAS SUPABASE FALHOU ===', {
-      orderId: order.id,
-      ifoodOrderId: order.ifood_order_id,
-      error: updateError.message,
-      code: updateError.code,
-      details: updateError.details,
-      hint: updateError.hint
-    });
-    return res.status(500).json({ error: 'iFood despachou o pedido, mas o sistema não conseguiu atualizar o status local' });
-  }
-  if (!updatedOrder) {
-    const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
-      .from('orders')
-      .select('status, driver_id')
-      .eq('id', order.id)
-      .single();
-    if (latestOrderError) {
-      console.error('=== [API /api/ifood/dispatch] FALHA AO VERIFICAR STATUS APÓS CONFLITO ===', {
-        orderId: order.id,
-        ifoodOrderId: order.ifood_order_id,
-        error: latestOrderError.message,
-        code: latestOrderError.code
-      });
-      return res.status(500).json({ error: 'iFood despachou o pedido, mas o sistema não conseguiu verificar o status local' });
-    }
-    if (latestOrder.driver_id !== order.driver_id || !['em_rota', 'entregue'].includes(latestOrder.status)) {
-      console.warn('=== [API /api/ifood/dispatch] STATUS LOCAL INESPERADO APÓS SUCESSO IFOOD ===', {
-        orderId: order.id,
-        ifoodOrderId: order.ifood_order_id,
-        status: latestOrder.status
-      });
-      return res.status(409).json({ error: 'iFood despachou o pedido, mas o status local mudou. Atualize a tela.' });
-    }
-  }
-
-  console.log('=== [API /api/ifood/dispatch] SUCESSO ===', {
-    orderId: order.id,
-    ifoodOrderId: order.ifood_order_id,
-    status: updatedOrder ? 'despacho solicitado; aguardando evento DSP' : 'já avançado',
-    durationMs: Date.now() - startedAt
-  });
-  return res.status(200).json({ ok: true });
+  return res.status(400).json({ error: 'Ação inválida' });
 }

@@ -139,12 +139,27 @@ vercel dev
 
 Isso roda frontend + funções serverless juntos localmente.
 
-
 ---
 
-**Rotas do entregador:** use rua e número, e as rotas são abertas no modo de duas rodas do Google Maps (`travelmode=two-wheeler`); coordenadas não são usadas para gerar a rota. A rota termina no endereço da loja, Pedro da Costa Agra, 296, Campina Grande/PB. Se faltar rua ou o número for `S/N`, `0` ou estiver vazio, o administrador precisa cadastrar um endereço ou nome do local no aviso do pedido. Esse endereço será usado na rota e no botão de cópia. Em bancos existentes, execute `supabase/migration_add_route_address.sql` no SQL Editor.
+**Despacho sem confirmação:** se o Gestor de Pedidos do iFood mostrar o pedido como despachado/em rota, mas o painel continuar em “Pronto”, use **Sincronizar após confirmar no iFood** no cartão do pedido. Essa ação não chama o iFood nem reenvia o despacho; apenas corrige o status local após a confirmação manual.
 
-**Saldo do entregador:** cada entrega concluida credita R$ 5,00, independentemente da taxa do iFood. Execute `supabase/migration_fix_driver_delivery_earnings.sql` antes de publicar; ela ajusta o historico e habilita atualizacoes em tempo real do saldo.
+**Rotas do entregador:** o destino usa rua e número, e as rotas são abertas no modo de duas rodas do Google Maps (`travelmode=two-wheeler`); coordenadas não são usadas para gerar a rota. A rota termina no endereço da loja, Pedro da Costa Agra, 296, Campina Grande/PB. Se faltar rua ou o número for `S/N`, `0` ou estiver vazio, o administrador precisa cadastrar um endereço ou nome de local no aviso do pedido. Esse endereço personalizado será usado tanto na rota quanto no botão de cópia. Em bancos existentes, execute `supabase/migration_add_route_address.sql` no SQL Editor antes de publicar essa versão.
+
+**Saldo do entregador:** cada entrega concluída credita R$ 5,00, independentemente da taxa de entrega do iFood. Antes de publicar a correção, execute `supabase/migration_fix_driver_delivery_earnings.sql` no SQL Editor. A migração corrige os valores já registrados no histórico para R$ 5,00 por entrega e habilita atualizações em tempo real do saldo.
+
+**Preview — aceite e despacho pelo entregador:** antes de testar esta alteração, execute `supabase/migration_driver_self_assignment.sql` no SQL Editor do projeto Supabase de desenvolvimento/preview. Ela libera a listagem segura de pedidos disponíveis, o aceite atômico com limite de 3 entregas ativas, a reatribuição administrativa e a trava de despacho. Não execute essa migração no projeto de produção enquanto a alteração não for aprovada.
+
+Para manter um histórico de eventos além da retenção dos logs da Vercel, execute `supabase/migration_ifood_webhook_attempts.sql` no SQL Editor de cada projeto Supabase antes de publicar a alteração. Os registros ficam disponíveis por 30 dias na tabela `public.ifood_webhook_attempts`:
+
+```sql
+select received_at, event_id, code, order_id, outcome, error_message
+from public.ifood_webhook_attempts
+where code = 'DSP' or order_id = 'ID_DO_PEDIDO_NO_IFOOD'
+order by received_at desc
+limit 100;
+```
+
+---
 
 ## 5. Como testar o fluxo de ponta a ponta
 
