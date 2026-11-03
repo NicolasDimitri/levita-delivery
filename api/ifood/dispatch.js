@@ -4,6 +4,8 @@
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { dispatchOrder, readyToPickupOrder } from '../../lib/ifood.js';
 
+const DISPATCH_RELEASE_GRACE_MS = 30_000;
+
 async function dispatchReadyOrder(orderId, driverId) {
   const { data: dispatchLock, error: lockError } = await supabaseAdmin.rpc('begin_driver_order_dispatch', {
     p_order_id: orderId,
@@ -342,6 +344,12 @@ export default async function handler(req, res) {
     if (order.status !== 'pronto' || order.ifood_dispatched_at || !order.ifood_dispatching_at) {
       return res.status(409).json({
         error: 'Não há uma tentativa incerta que possa ser liberada para este pedido.'
+      });
+    }
+    const dispatchAge = Date.now() - Date.parse(order.ifood_dispatching_at);
+    if (!Number.isFinite(dispatchAge) || dispatchAge < DISPATCH_RELEASE_GRACE_MS) {
+      return res.status(409).json({
+        error: 'Aguarde pelo menos 30 segundos após o início do despacho antes de liberar uma nova tentativa.'
       });
     }
 

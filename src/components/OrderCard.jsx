@@ -55,7 +55,7 @@ export default function OrderCard({ order, drivers, onChanged }) {
   };
   const releaseDispatch = () => {
     if (window.confirm(
-      'Confirme no Gestor de Pedidos do iFood que este pedido NÃO foi despachado. Só então libere uma nova tentativa.'
+      'Aguarde pelo menos 30 segundos após o início do despacho e confirme no Gestor de Pedidos do iFood que este pedido NÃO foi despachado. Só então libere uma nova tentativa.'
     )) {
       run('release-dispatch', () => call('/api/ifood/dispatch', {
         body: { orderId: order.id, action: 'release-dispatch' }
@@ -102,6 +102,14 @@ export default function OrderCard({ order, drivers, onChanged }) {
     if (!selectedDriver) return setError('Selecione um entregador primeiro.');
     run('assign', () => call('/api/ifood/assign-driver', {
       body: { orderId: order.id, driverId: selectedDriver }
+    }));
+  };
+  const unassignDriver = () => {
+    if (!window.confirm(
+      'Desvincular este pedido do entregador atual? O pedido ficará disponível para todos os entregadores aceitarem. Se já foi despachado ao iFood, ele não será despachado novamente.'
+    )) return;
+    run('unassign', () => call('/api/ifood/assign-driver', {
+      body: { orderId: order.id, driverId: null }
     }));
   };
 
@@ -200,6 +208,14 @@ export default function OrderCard({ order, drivers, onChanged }) {
               {loading('assign') ? 'Salvando...' : order.driver_id ? 'Trocar' : 'Atribuir'}
             </Button>
           </div>
+          <Button
+            variant="danger"
+            onClick={unassignDriver}
+            disabled={loading('unassign') || Boolean(order.ifood_dispatching_at)}
+            className="w-full"
+          >
+            {loading('unassign') ? 'Desvinculando...' : 'Deixar disponível para os entregadores'}
+          </Button>
           <p className="text-xs text-gray-400">Entregador: {driverName || 'Indisponível'}</p>
         </div>
       )}

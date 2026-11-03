@@ -22,8 +22,10 @@ export default async function handler(req, res) {
   }
 
   const { orderId, driverId } = req.body || {};
-  if (!orderId || !driverId) {
-    return res.status(400).json({ error: 'orderId e driverId são obrigatórios' });
+  const isUuid = (value) => typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  if (!isUuid(orderId) || (driverId !== null && !isUuid(driverId))) {
+    return res.status(400).json({ error: 'orderId e driverId devem ser UUIDs válidos; driverId pode ser null para deixar o pedido disponível.' });
   }
 
   const { error: reassignError } = await supabaseAdmin.rpc('admin_reassign_delivery_order', {

@@ -1,6 +1,7 @@
 -- Enable driver self-assignment in the development/preview Supabase project.
--- Drivers can claim available orders atomically and dispatch only their own
--- ready orders. Run this migration once in the development project's SQL Editor.
+-- Drivers can claim available orders atomically, including orders already
+-- dispatched to the iFood, and dispatch only their own ready orders.
+-- Run this migration once in the development project's SQL Editor.
 
 alter table public.orders
   add column if not exists ifood_dispatching_at timestamptz,
@@ -54,9 +55,17 @@ as $$
       and profiles.role = 'driver'
   )
     and o.driver_id is null
-    and o.ifood_dispatched_at is null
     and o.ifood_dispatching_at is null
-    and o.status in ('recebido', 'em_preparo', 'pronto')
+    and (
+      (
+        o.status in ('recebido', 'em_preparo', 'pronto')
+        and o.ifood_dispatched_at is null
+      )
+      or (
+        o.status = 'em_rota'
+        and o.ifood_dispatched_at is not null
+      )
+    )
   order by o.created_at asc;
 $$;
 
@@ -101,8 +110,16 @@ begin
       assigned_at = clock_timestamp()
   where id = p_order_id
     and driver_id is null
-    and status in ('recebido', 'em_preparo', 'pronto')
-  and ifood_dispatched_at is null
+  and (
+    (
+      status in ('recebido', 'em_preparo', 'pronto')
+      and ifood_dispatched_at is null
+    )
+    or (
+      status = 'em_rota'
+      and ifood_dispatched_at is not null
+    )
+  )
   and ifood_dispatching_at is null
   returning id into v_order_id;
 
@@ -130,12 +147,14 @@ declare
   v_order public.orders%rowtype;
   v_active_count integer;
 begin
-  perform 1
-  from public.profiles
-  where id = p_driver_id and role = 'driver'
-  for update;
-  if not found then
-    raise exception using errcode = 'P0001', message = 'Entregador inválido.';
+  if p_driver_id is not null then
+    perform 1
+    from public.profiles
+    where id = p_driver_id and role = 'driver'
+    for update;
+    if not found then
+      raise exception using errcode = 'P0001', message = 'Entregador inválido.';
+    end if;
   end if;
 
   select *
@@ -151,11 +170,23 @@ begin
     raise exception using errcode = 'P0001', message = 'Não é possível trocar o entregador de um pedido finalizado.';
   end if;
 
-  if v_order.status = 'pronto' and v_order.ifood_dispatching_at is not null then
-    raise exception using errcode = 'P0001', message = 'Aguarde a confirmação do despacho antes de trocar o entregador.';
+  if v_order.ifood_dispatching_at is not null then
+    raise exception using errcode = 'P0001', message = 'Aguarde a confirmação do despacho antes de alterar o entregador.';
   end if;
 
-  if v_order.driver_id is distinct from p_driver_id then
+  if p_driver_id is null
+     and v_order.ifood_dispatched_at is not null
+     and v_order.status <> 'em_rota' then
+    raise exception using errcode = 'P0001', message = 'Aguarde o pedido entrar em rota antes de disponibilizá-lo novamente.';
+  end if;
+
+  if p_driver_id is null
+     and v_order.status = 'em_rota'
+     and v_order.ifood_dispatched_at is null then
+    raise exception using errcode = 'P0001', message = 'Não é possível disponibilizar um pedido em rota sem confirmação de despacho.';
+  end if;
+
+  if p_driver_id is not null and v_order.driver_id is distinct from p_driver_id then
     select count(*)
       into v_active_count
     from public.orders
@@ -170,7 +201,7 @@ begin
 
   update public.orders
   set driver_id = p_driver_id,
-      assigned_at = clock_timestamp()
+      assigned_at = case when p_driver_id is null then null else clock_timestamp() end
   where id = p_order_id;
 
   return p_order_id;
