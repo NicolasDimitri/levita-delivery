@@ -142,6 +142,12 @@ export default function DriverPage() {
     return () => window.clearInterval(intervalId);
   }, [tab, loadAvailableOrders]);
 
+  useEffect(() => {
+    if (tab !== 'ativas') return undefined;
+    const intervalId = window.setInterval(loadOrders, 10000);
+    return () => window.clearInterval(intervalId);
+  }, [tab, loadOrders]);
+
   const tabs = [
     { id: 'disponiveis', label: `Disponíveis${availableOrders.length > 0 ? ` (${availableOrders.length})` : ''}` },
     { id: 'ativas',     label: `Minhas entregas${orders.length > 0 ? ` (${orders.length})` : ''}` },
