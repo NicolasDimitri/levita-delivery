@@ -28,6 +28,7 @@ export default function DriverPage() {
   const [balanceError, setBalanceError] = useState('');
   const [dispatching, setDispatching] = useState(false);
   const [dispatchMessage, setDispatchMessage] = useState('');
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
 
   const loadOrders = useCallback(async () => {
     const { data, error } = await supabase
@@ -127,14 +128,30 @@ export default function DriverPage() {
         { event: '*', schema: 'public', table: 'withdrawals', filter: `driver_id=eq.${session.user.id}` },
         () => { loadBalance(); if (tab === 'saque') loadWithdrawals(); }
       )
-      .subscribe();
-    return () => supabase.removeChannel(channel);
+      .subscribe((status, error) => {
+        const connected = status === 'SUBSCRIBED';
+        setRealtimeConnected(connected);
+        if (error || ['CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+          console.error('Realtime de entregas indisponível; sincronização periódica continuará ativa', {
+            status,
+            error: error?.message || null
+          });
+        }
+      });
+    return () => {
+      setRealtimeConnected(false);
+      supabase.removeChannel(channel);
+    };
   }, [loadOrders, loadAvailableOrders, loadBalance, loadFinishedOrders, loadWithdrawals, session, tab]);
 
   useEffect(() => {
     if (tab === 'finalizadas') loadFinishedOrders();
     if (tab === 'saque') loadWithdrawals();
   }, [tab, loadFinishedOrders, loadWithdrawals]);
+
+  const hasPendingDispatch = orders.some(order =>
+    order.status === 'pronto' && (order.ifood_dispatched_at || order.ifood_dispatching_at)
+  );
 
   useEffect(() => {
     if (tab !== 'disponiveis') return undefined;
@@ -143,10 +160,10 @@ export default function DriverPage() {
   }, [tab, loadAvailableOrders]);
 
   useEffect(() => {
-    if (tab !== 'ativas') return undefined;
+    if (tab !== 'ativas' || (realtimeConnected && !hasPendingDispatch)) return undefined;
     const intervalId = window.setInterval(loadOrders, 10000);
     return () => window.clearInterval(intervalId);
-  }, [tab, loadOrders]);
+  }, [tab, loadOrders, realtimeConnected, hasPendingDispatch]);
 
   const tabs = [
     { id: 'disponiveis', label: `Disponíveis${availableOrders.length > 0 ? ` (${availableOrders.length})` : ''}` },
@@ -271,6 +288,11 @@ export default function DriverPage() {
           <>
             {ordersError && (
               <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-600">{ordersError}</p>
+            )}
+            {!realtimeConnected && (
+              <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+                Atualização em tempo real indisponível; sincronizando automaticamente a cada 10 segundos.
+              </p>
             )}
             {loading && <p className="text-sm text-gray-400">Carregando...</p>}
             {orders.length > 0 && (

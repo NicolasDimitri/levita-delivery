@@ -89,11 +89,15 @@ export default function AdminPage() {
   useEffect(() => { if (tab === 'finalizados') loadFinalOrders(); }, [tab, loadFinalOrders]);
   useEffect(() => { if (tab === 'entregadores') loadDriverBalances(); }, [tab, loadDriverBalances]);
 
+  const hasPendingDispatch = orders.some(order =>
+    order.status === 'pronto' && (order.ifood_dispatched_at || order.ifood_dispatching_at)
+  );
+
   useEffect(() => {
-    if (tab !== 'ativos') return undefined;
+    if (tab !== 'ativos' || (realtimeConnected && !hasPendingDispatch)) return undefined;
     const intervalId = window.setInterval(loadOrders, 10000);
     return () => window.clearInterval(intervalId);
-  }, [tab, loadOrders]);
+  }, [tab, loadOrders, realtimeConnected, hasPendingDispatch]);
 
   useEffect(() => {
     const ch = supabase.channel('admin-orders')
