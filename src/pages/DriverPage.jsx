@@ -6,10 +6,22 @@ import DeliveryCard from '../components/DeliveryCard';
 import AvailableOrderCard from '../components/AvailableOrderCard';
 import { useApi } from '../lib/useApi';
 import {
+  buildWazeDestinationUrl,
   buildGoogleMapsRouteBatches,
   getGoogleMapsDestination,
   STORE_RETURN_ADDRESS
 } from '../../lib/deliveryAddress';
+
+const NAVIGATION_APP_STORAGE_KEY = 'delivery-navigation-app';
+
+function getPreferredNavigationApp() {
+  try {
+    return window.localStorage.getItem(NAVIGATION_APP_STORAGE_KEY) === 'waze' ? 'waze' : 'google-maps';
+  } catch (error) {
+    console.warn('Não foi possível ler a preferência de aplicativo de navegação', error);
+    return 'google-maps';
+  }
+}
 
 export default function DriverPage() {
   const { signOut, profile, session } = useAuth();
@@ -29,6 +41,7 @@ export default function DriverPage() {
   const [dispatching, setDispatching] = useState(false);
   const [dispatchMessage, setDispatchMessage] = useState('');
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [navigationApp, setNavigationApp] = useState(getPreferredNavigationApp);
 
   const loadOrders = useCallback(async () => {
     const { data, error } = await supabase
@@ -188,6 +201,22 @@ export default function DriverPage() {
       ...routeStops.map((stop) => stop.destination),
       STORE_RETURN_ADDRESS
     ]);
+  const wazeStops = [
+    ...routeStops.map((stop) => ({
+      label: stop.order.customer_name || 'Entrega',
+      destination: stop.destination
+    })),
+    { label: 'Retorno à loja', destination: STORE_RETURN_ADDRESS }
+  ];
+
+  function selectNavigationApp(app) {
+    setNavigationApp(app);
+    try {
+      window.localStorage.setItem(NAVIGATION_APP_STORAGE_KEY, app);
+    } catch (error) {
+      console.warn('Não foi possível salvar a preferência de aplicativo de navegação', error);
+    }
+  }
 
   async function dispatchReadyOrders() {
     const orderIds = readyOrdersToDispatch.map((order) => order.id);
@@ -317,23 +346,71 @@ export default function DriverPage() {
                 {dispatchMessage && (
                   <p className="mb-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{dispatchMessage}</p>
                 )}
-                {routeOrders.length > 0 && route.batches.length > 0 && route.failedIndex < 0 ? (
+                {routeOrders.length > 0 && ordersWithoutAddress === 0 && (
                   <div className="space-y-2">
-                    {route.batches.map((batch, index) => (
-                      <a
-                        key={`${index}-${batch.url}`}
-                        href={batch.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
+                    <div className="flex gap-2">
+                      {[
+                        { id: 'google-maps', label: 'Google Maps' },
+                        { id: 'waze', label: 'Waze' }
+                      ].map((app) => (
+                        <button
+                          key={app.id}
+                          type="button"
+                          aria-pressed={navigationApp === app.id}
+                          onClick={() => selectNavigationApp(app.id)}
+                          className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
+                            navigationApp === app.id
+                              ? 'border-blue-600 bg-blue-50 text-blue-700'
+                              : 'border-gray-300 bg-white text-gray-600'
+                          }`}
+                        >
+                          {app.label}
+                        </button>
+                      ))}
+                    </div>
+                    {navigationApp === 'google-maps' && route.batches.length > 0 && route.failedIndex < 0 ? (
+                      route.batches.map((batch, index) => (
+                        <a
+                          key={`${index}-${batch.url}`}
+                          href={batch.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
+                        >
+                          Abrir rota no Google Maps
+                          {route.batches.length > 1 ? ` (${index + 1}/${route.batches.length})` : ''}
+                          {' '}· {batch.stops.length} paradas
+                        </a>
+                      ))
+                    ) : navigationApp === 'waze' ? (
+                      <>
+                        <p className="text-center text-xs text-gray-500">
+                          O Waze abre um destino por vez. Selecione cada parada conforme avançar na rota.
+                        </p>
+                        {wazeStops.map((stop, index) => (
+                          <a
+                            key={`${index}-${stop.destination}`}
+                            href={buildWazeDestinationUrl(stop.destination)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
+                          >
+                            {index + 1}. Navegar no Waze: {stop.label}
+                          </a>
+                        ))}
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="w-full rounded-lg bg-gray-300 py-2.5 text-sm font-semibold text-gray-600"
                       >
-                        Abrir rota no Google Maps
-                        {route.batches.length > 1 ? ` (${index + 1}/${route.batches.length})` : ''}
-                        {' '}· {batch.stops.length} paradas
-                      </a>
-                    ))}
+                        Rota indisponível: verifique os endereços
+                      </button>
+                    )}
                   </div>
-                ) : routeOrders.length > 0 ? (
+                )}
+                {routeOrders.length > 0 && ordersWithoutAddress > 0 ? (
                   <button
                     type="button"
                     disabled
