@@ -185,7 +185,7 @@ export default function DriverPage() {
     { id: 'saque',      label: 'Carteira' },
   ];
 
-  const routeOrders = orders.filter((order) => ['pronto', 'em_rota'].includes(order.status));
+  const routeOrders = orders.filter((order) => order.status === 'em_rota');
   const readyOrdersToDispatch = orders.filter((order) =>
     order.status === 'pronto' && !order.ifood_dispatched_at && !order.ifood_dispatching_at
   );
@@ -421,7 +421,7 @@ export default function DriverPage() {
                 ) : null}
                 {routeOrders.length > 0 && (
                   <p className="mt-1 text-center text-xs text-gray-500">
-                    Início na sua localização atual; entregas prontas/em rota e retorno à loja no final.
+                    Rota com pedidos despachados para você; retorno à loja ao final.
                   </p>
                 )}
                 {ordersWithoutAddress > 0 && (
