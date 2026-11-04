@@ -134,6 +134,7 @@ async function dispatchReadyOrder(orderId, driverId) {
     const { data: updatedOrder, error: updateError } = await supabaseAdmin
       .from('orders')
       .update({
+        status: 'em_rota',
         ifood_dispatched_at: dispatchedAt,
         ifood_dispatching_at: null
       })
