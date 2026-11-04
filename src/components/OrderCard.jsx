@@ -16,18 +16,12 @@ function getCancellationCode(reason) {
 export default function OrderCard({ order, drivers, onChanged }) {
   const { call } = useApi();
   const [loadingKey, setLoadingKey] = useState(null);
-  const [selectedDriver, setSelectedDriver] = useState(order.driver_id || '');
   const [showDriverSelector, setShowDriverSelector] = useState(false);
   const [cancellationReasons, setCancellationReasons] = useState([]);
   const [selectedCancellation, setSelectedCancellation] = useState('');
   const [routeAddress, setRouteAddress] = useState(order.route_address || '');
   const [error, setError] = useState('');
   const [cancellationPending, setCancellationPending] = useState(false);
-
-  useEffect(() => {
-    setSelectedDriver(order.driver_id || '');
-    setShowDriverSelector(false);
-  }, [order.driver_id]);
 
   useEffect(() => {
     setRouteAddress(order.route_address || '');
@@ -100,11 +94,10 @@ export default function OrderCard({ order, drivers, onChanged }) {
     if (updateError) throw updateError;
   });
 
-  const assignDriver = () => {
-    if (!selectedDriver) return setError('Selecione um entregador primeiro.');
+  const assignDriver = (driverId) => {
     run('assign', async () => {
       await call('/api/ifood/assign-driver', {
-        body: { orderId: order.id, driverId: selectedDriver }
+        body: { orderId: order.id, driverId }
       });
       setShowDriverSelector(false);
     });
@@ -223,24 +216,58 @@ export default function OrderCard({ order, drivers, onChanged }) {
             </Button>
           </div>
           {showDriverSelector && (
-            <div className="space-y-2">
-              <select
-                value={selectedDriver}
-                onChange={event => setSelectedDriver(event.target.value)}
-                disabled={Boolean(order.ifood_dispatching_at && order.status === 'pronto')}
-                className="w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none disabled:bg-gray-100"
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+              onClick={() => !loading('assign') && setShowDriverSelector(false)}
+            >
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={`driver-selector-title-${order.id}`}
+                className="max-h-[85vh] w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+                onClick={event => event.stopPropagation()}
               >
-                <option value="">Selecionar entregador</option>
-                {drivers.map(driver => <option key={driver.id} value={driver.id}>{driver.name}</option>)}
-              </select>
-              <Button
-                variant="primary"
-                onClick={assignDriver}
-                disabled={loading('assign') || !selectedDriver || selectedDriver === order.driver_id || Boolean(order.ifood_dispatching_at && order.status === 'pronto')}
-                className="w-full"
-              >
-                {loading('assign') ? 'Salvando...' : 'Salvar troca'}
-              </Button>
+                <div className="flex items-center justify-between border-b border-gray-100 p-4">
+                  <div>
+                    <h2 id={`driver-selector-title-${order.id}`} className="font-semibold text-gray-800">
+                      Trocar entregador
+                    </h2>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Pedido {order.display_id ? `#${order.display_id}` : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDriverSelector(false)}
+                    disabled={loading('assign')}
+                    aria-label="Fechar seleção de entregador"
+                    className="rounded-full px-3 py-1 text-xl text-gray-400 hover:bg-gray-100 disabled:opacity-50"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="max-h-[65vh] space-y-2 overflow-y-auto p-4">
+                  {drivers.filter(driver => driver.id !== order.driver_id).length === 0 ? (
+                    <p className="py-6 text-center text-sm text-gray-500">
+                      Não há outros entregadores cadastrados para selecionar.
+                    </p>
+                  ) : drivers.filter(driver => driver.id !== order.driver_id).map(driver => (
+                    <button
+                      key={driver.id}
+                      type="button"
+                      onClick={() => assignDriver(driver.id)}
+                      disabled={loading('assign') || Boolean(order.ifood_dispatching_at && order.status === 'pronto')}
+                      className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-left hover:border-brand-300 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span>
+                        <span className="block text-sm font-medium text-gray-800">{driver.name}</span>
+                        {driver.phone && <span className="mt-0.5 block text-xs text-gray-500">{driver.phone}</span>}
+                      </span>
+                      {loading('assign') && <span className="text-xs text-gray-500">Trocando...</span>}
+                    </button>
+                  ))}
+                </div>
+              </section>
             </div>
           )}
         </div>
