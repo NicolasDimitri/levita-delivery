@@ -17,6 +17,7 @@ export default function OrderCard({ order, drivers, onChanged }) {
   const { call } = useApi();
   const [loadingKey, setLoadingKey] = useState(null);
   const [selectedDriver, setSelectedDriver] = useState(order.driver_id || '');
+  const [showDriverSelector, setShowDriverSelector] = useState(false);
   const [cancellationReasons, setCancellationReasons] = useState([]);
   const [selectedCancellation, setSelectedCancellation] = useState('');
   const [routeAddress, setRouteAddress] = useState(order.route_address || '');
@@ -25,6 +26,7 @@ export default function OrderCard({ order, drivers, onChanged }) {
 
   useEffect(() => {
     setSelectedDriver(order.driver_id || '');
+    setShowDriverSelector(false);
   }, [order.driver_id]);
 
   useEffect(() => {
@@ -100,9 +102,12 @@ export default function OrderCard({ order, drivers, onChanged }) {
 
   const assignDriver = () => {
     if (!selectedDriver) return setError('Selecione um entregador primeiro.');
-    run('assign', () => call('/api/ifood/assign-driver', {
-      body: { orderId: order.id, driverId: selectedDriver }
-    }));
+    run('assign', async () => {
+      await call('/api/ifood/assign-driver', {
+        body: { orderId: order.id, driverId: selectedDriver }
+      });
+      setShowDriverSelector(false);
+    });
   };
   const unassignDriver = () => {
     if (!window.confirm(
@@ -196,27 +201,48 @@ export default function OrderCard({ order, drivers, onChanged }) {
 
       {order.driver_id && ['recebido', 'em_preparo', 'pronto', 'em_rota'].includes(order.status) && (
         <div className="space-y-2 border-t border-gray-100 pt-3">
+          <p className="text-xs text-gray-500">
+            Entregador: <span className="font-medium text-gray-700">{driverName || 'Indisponível'}</span>
+          </p>
           <div className="flex gap-2">
-            <select value={selectedDriver} onChange={e => setSelectedDriver(e.target.value)}
+            <Button
+              variant="secondary"
+              onClick={() => setShowDriverSelector(value => !value)}
               disabled={Boolean(order.ifood_dispatching_at && order.status === 'pronto')}
-              className="flex-1 rounded-xl border-2 border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none disabled:bg-gray-100">
-              <option value="">Selecionar entregador</option>
-              {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-            <Button variant="primary" onClick={assignDriver}
-              disabled={loading('assign') || !selectedDriver || Boolean(order.ifood_dispatching_at && order.status === 'pronto')}>
-              {loading('assign') ? 'Salvando...' : order.driver_id ? 'Trocar' : 'Atribuir'}
+              className="flex-1"
+            >
+              {showDriverSelector ? 'Cancelar troca' : 'Trocar'}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={unassignDriver}
+              disabled={loading('unassign') || Boolean(order.ifood_dispatching_at)}
+              className="flex-1"
+            >
+              {loading('unassign') ? 'Desvinculando...' : 'Desvincular'}
             </Button>
           </div>
-          <Button
-            variant="danger"
-            onClick={unassignDriver}
-            disabled={loading('unassign') || Boolean(order.ifood_dispatching_at)}
-            className="w-full"
-          >
-            {loading('unassign') ? 'Desvinculando...' : 'Deixar disponível para os entregadores'}
-          </Button>
-          <p className="text-xs text-gray-400">Entregador: {driverName || 'Indisponível'}</p>
+          {showDriverSelector && (
+            <div className="space-y-2">
+              <select
+                value={selectedDriver}
+                onChange={event => setSelectedDriver(event.target.value)}
+                disabled={Boolean(order.ifood_dispatching_at && order.status === 'pronto')}
+                className="w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none disabled:bg-gray-100"
+              >
+                <option value="">Selecionar entregador</option>
+                {drivers.map(driver => <option key={driver.id} value={driver.id}>{driver.name}</option>)}
+              </select>
+              <Button
+                variant="primary"
+                onClick={assignDriver}
+                disabled={loading('assign') || !selectedDriver || selectedDriver === order.driver_id || Boolean(order.ifood_dispatching_at && order.status === 'pronto')}
+                className="w-full"
+              >
+                {loading('assign') ? 'Salvando...' : 'Salvar troca'}
+              </Button>
+            </div>
+          )}
         </div>
       )}
       {!order.driver_id && ['recebido', 'em_preparo', 'pronto'].includes(order.status) && (
