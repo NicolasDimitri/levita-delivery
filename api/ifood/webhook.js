@@ -208,7 +208,7 @@ async function recordWebhookAttempt(event, outcome, errorMessage = null) {
   }
 }
 
-async function updateOrderStatusFromEvent(event, targetStatus, allowedStatuses, additionalValues = {}) {
+async function updateOrderStatusFromEvent(event, targetStatus, allowedStatuses) {
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
     .select('id, status')
@@ -230,7 +230,7 @@ async function updateOrderStatusFromEvent(event, targetStatus, allowedStatuses, 
 
   const { data: updatedOrder, error: updateError } = await supabaseAdmin
     .from('orders')
-    .update({ ...additionalValues, status: targetStatus })
+    .update({ status: targetStatus })
     .eq('id', order.id)
     .in('status', allowedStatuses)
     .select('id')
@@ -261,10 +261,7 @@ async function handleConfirmed(event) {
 }
 
 async function handleDispatched(event) {
-  await updateOrderStatusFromEvent(event, 'em_rota', ['pronto'], {
-    ifood_dispatched_at: new Date().toISOString(),
-    ifood_dispatching_at: null
-  });
+  await updateOrderStatusFromEvent(event, 'em_rota', ['pronto']);
 }
 
 async function handleReadyToPickup(event) {

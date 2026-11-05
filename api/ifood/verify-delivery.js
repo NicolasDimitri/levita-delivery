@@ -113,7 +113,7 @@ export default async function handler(req, res) {
   // A partir daqui o iFood já confirmou a entrega. Falha ao persistir o estado
   // local deve ser explícita para que a reconciliação pelo webhook possa ocorrer.
   try {
-    let updateOrderQuery = supabaseAdmin
+    const { data: updatedOrder, error: updateOrderError } = await supabaseAdmin
       .from('orders')
       .update({
         status: 'entregue',
@@ -121,11 +121,7 @@ export default async function handler(req, res) {
         delivered_at: new Date().toISOString()
       })
       .eq('id', order.id)
-      .eq('status', 'em_rota');
-    updateOrderQuery = order.driver_id
-      ? updateOrderQuery.eq('driver_id', order.driver_id)
-      : updateOrderQuery.is('driver_id', null);
-    const { data: updatedOrder, error: updateOrderError } = await updateOrderQuery
+      .eq('status', 'em_rota')
       .select('id')
       .maybeSingle();
 

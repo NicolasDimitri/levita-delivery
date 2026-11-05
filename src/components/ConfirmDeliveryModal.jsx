@@ -151,6 +151,22 @@ export default function ConfirmDeliveryModal({ order, onClose, onConfirmed }) {
         <h2 className="mb-1 text-lg font-semibold">Confirmar entrega</h2>
         <p className="mb-4 text-sm text-gray-500">Pedido de {order.customer_name}</p>
 
+        {checkingStoredCode && <p className="text-sm text-gray-400">Verificando...</p>}
+
+        {!checkingStoredCode && hasStoredCode && (
+          <button
+            onClick={() => handleConfirm({ useStoredCode: true })}
+            disabled={loading}
+            className="mb-3 w-full rounded-lg bg-green-600 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+          >
+            {loading ? 'Confirmando...' : 'Confirmar entrega sem código'}
+          </button>
+        )}
+
+        {!checkingStoredCode && hasStoredCode && (
+          <p className="mb-3 text-center text-xs text-gray-400">ou digite um novo código abaixo</p>
+        )}
+
         <div className="mb-3">
           <label className="mb-1 block text-sm font-medium">Código de confirmação do cliente</label>
           <div className="flex items-center gap-2">
@@ -206,15 +222,6 @@ export default function ConfirmDeliveryModal({ order, onClose, onConfirmed }) {
             {loading ? 'Confirmando...' : 'Confirmar'}
           </button>
         </div>
-        {!checkingStoredCode && hasStoredCode && (
-          <button
-            onClick={() => handleConfirm({ useStoredCode: true })}
-            disabled={loading}
-            className="mt-2 w-full rounded-lg bg-green-600 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
-          >
-            {loading ? 'Confirmando...' : 'Confirmar entrega sem código'}
-          </button>
-        )}
       </div>
     </div>
   );
