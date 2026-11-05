@@ -15,43 +15,8 @@ create table public.profiles (
   role  text not null check (role in ('admin', 'driver')),
   name  text not null,
   phone text,
-  pix_key text,
   created_at timestamptz not null default now()
 );
-
-create or replace function public.create_driver_profile_for_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-begin
-  if new.raw_user_meta_data ->> 'driver_signup' is distinct from 'true' then
-    return new;
-  end if;
-
-  insert into public.profiles (id, role, name, phone, pix_key)
-  values (
-    new.id,
-    'driver',
-    coalesce(
-      nullif(trim(new.raw_user_meta_data ->> 'name'), ''),
-      nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
-      'Entregador'
-    ),
-    nullif(trim(new.raw_user_meta_data ->> 'phone'), ''),
-    nullif(trim(new.raw_user_meta_data ->> 'pix_key'), '')
-  )
-  on conflict (id) do nothing;
-
-  return new;
-end;
-$$;
-
-create trigger create_driver_profile_after_signup
-  after insert on auth.users
-  for each row
-  execute function public.create_driver_profile_for_new_user();
 
 -- ============================================================
 -- TABELA: clientes (identificados pelo customer.id do iFood)

@@ -29,25 +29,16 @@ export default function AdminPage() {
   const [drivers, setDrivers] = useState([]);
   const [driverBalances, setDriverBalances] = useState({});
   const [loadingWithdraw, setLoadingWithdraw] = useState(null);
-  const [copiedPixDriver, setCopiedPixDriver] = useState(null);
   const [withdrawError, setWithdrawError] = useState('');
   const [balanceError, setBalanceError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [ordersError, setOrdersError] = useState('');
-  const [realtimeConnected, setRealtimeConnected] = useState(false);
 
   const loadOrders = useCallback(async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('orders').select('*, order_items(*, order_item_additions(*))')
       .not('status', 'in', '("entregue","cancelado")')
       .order('created_at', { ascending: false });
-    if (error) {
-      console.error('Não foi possível carregar os pedidos do administrador', error);
-      setOrdersError('Não foi possível atualizar os pedidos. Verifique a conexão e tente novamente.');
-    } else {
-      setOrdersError('');
-      setOrders(data || []);
-    }
+    setOrders(data || []);
     setLoading(false);
   }, []);
 
@@ -90,16 +81,6 @@ export default function AdminPage() {
   useEffect(() => { if (tab === 'finalizados') loadFinalOrders(); }, [tab, loadFinalOrders]);
   useEffect(() => { if (tab === 'entregadores') loadDriverBalances(); }, [tab, loadDriverBalances]);
 
-  const hasPendingDispatch = orders.some(order =>
-    order.status === 'pronto' && (order.ifood_dispatched_at || order.ifood_dispatching_at)
-  );
-
-  useEffect(() => {
-    if (tab !== 'ativos' || (realtimeConnected && !hasPendingDispatch)) return undefined;
-    const intervalId = window.setInterval(loadOrders, 10000);
-    return () => window.clearInterval(intervalId);
-  }, [tab, loadOrders, realtimeConnected, hasPendingDispatch]);
-
   useEffect(() => {
     const ch = supabase.channel('admin-orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
@@ -109,20 +90,8 @@ export default function AdminPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_history' }, () => {
         if (tab === 'entregadores') loadDriverBalances();
       })
-      .subscribe((status, error) => {
-        const connected = status === 'SUBSCRIBED';
-        setRealtimeConnected(connected);
-        if (error || ['CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
-          console.error('Realtime de pedidos do administrador indisponível; atualização periódica continuará ativa', {
-            status,
-            error: error?.message || null
-          });
-        }
-      });
-    return () => {
-      setRealtimeConnected(false);
-      supabase.removeChannel(ch);
-    };
+      .subscribe();
+    return () => supabase.removeChannel(ch);
   }, [loadOrders, loadFinalOrders, loadDriverBalances, tab]);
 
   async function registerWithdrawal(driver) {
@@ -139,25 +108,6 @@ export default function AdminPage() {
     setLoadingWithdraw(null);
     if (error) { setWithdrawError(error.message); return; }
     await loadDriverBalances();
-  }
-
-  async function copyDriverPix(driver) {
-    setWithdrawError('');
-    if (!driver.pix_key) {
-      setWithdrawError(`O entregador ${driver.name} ainda não cadastrou uma chave PIX.`);
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(driver.pix_key);
-      setCopiedPixDriver(driver.id);
-      window.setTimeout(() => {
-        setCopiedPixDriver((current) => current === driver.id ? null : current);
-      }, 2000);
-    } catch (error) {
-      console.error('Não foi possível copiar a chave PIX', error);
-      setWithdrawError('Não foi possível copiar a chave PIX. Verifique a permissão da área de transferência do navegador.');
-    }
   }
 
   return (
@@ -183,18 +133,9 @@ export default function AdminPage() {
       <div className="mx-auto max-w-7xl px-4 pt-5">
         {/* ativos */}
         {tab === 'ativos' && (
-          <>
-            {!realtimeConnected && (
-              <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-                Atualização em tempo real indisponível; os pedidos serão sincronizados automaticamente a cada 10 segundos.
-              </p>
-            )}
-            {ordersError && (
-              <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-600">{ordersError}</p>
-            )}
-            {loading
-              ? <p className="text-sm text-gray-400">Carregando...</p>
-              : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          loading
+            ? <p className="text-sm text-gray-400">Carregando...</p>
+            : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {ACTIVE_COLUMNS.map(col => {
                   const colOrders = orders.filter(o => o.status === col.status);
                   return (
@@ -212,8 +153,6 @@ export default function AdminPage() {
                   );
                 })}
               </div>
-            }
-          </>
         )}
 
         {/* finalizados */}
@@ -248,26 +187,12 @@ export default function AdminPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="mt-3 flex gap-2">
-                    <Button
-                      variant="secondary"
-                      className="flex-1"
-                      onClick={() => copyDriverPix(driver)}
-                      disabled={!driver.pix_key}
-                    >
-                      {copiedPixDriver === driver.id ? 'PIX copiado!' : 'Copiar PIX'}
+                  {balance > 0 && (
+                    <Button variant="success" size="lg" className="mt-3 w-full"
+                      onClick={() => registerWithdrawal(driver)} disabled={isPaying}>
+                      {isPaying ? 'Registrando...' : `Marcar R$ ${fmtBRL(balance)} como pago`}
                     </Button>
-                    {balance > 0 && (
-                      <Button
-                        variant="success"
-                        className="flex-1"
-                        onClick={() => registerWithdrawal(driver)}
-                        disabled={isPaying}
-                      >
-                        {isPaying ? 'Registrando...' : `Marcar R$ ${fmtBRL(balance)} como pago`}
-                      </Button>
-                    )}
-                  </div>
+                  )}
                   {balance === 0 && (
                     <p className="mt-2 text-center text-xs text-gray-400">Saldo zerado ✓</p>
                   )}
