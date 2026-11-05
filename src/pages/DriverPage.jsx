@@ -285,9 +285,6 @@ export default function DriverPage() {
             {availableOrdersError && (
               <p className="rounded-xl bg-red-50 p-3 text-sm text-red-600">{availableOrdersError}</p>
             )}
-            <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
-              Aceite pedidos disponíveis. Cada entregador pode ficar com até 3 pedidos ativos; pedidos ainda não prontos ficam aguardando na sua lista.
-            </div>
             {orders.length >= 3 && (
               <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
                 Você já atingiu o limite de 3 pedidos ativos.
