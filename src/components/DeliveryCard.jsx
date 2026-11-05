@@ -3,9 +3,9 @@ import { useState } from 'react';
 import PaymentBadge from './PaymentBadge';
 import ConfirmDeliveryModal from './ConfirmDeliveryModal';
 import CountdownTimer from './CountdownTimer';
-import { getOrderNavigationAddress } from '../../lib/deliveryAddress';
+import { buildWazeDestinationUrl, getOrderNavigationAddress } from '../../lib/deliveryAddress';
 
-export default function DeliveryCard({ order, onChanged }) {
+export default function DeliveryCard({ order, navigationApp, onChanged }) {
   const [copied, setCopied] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
@@ -89,21 +89,47 @@ export default function DeliveryCard({ order, onChanged }) {
         ))}
       </ul>
 
-      {order.status === 'em_rota' && <div className="flex gap-2">
-        <button
-          onClick={handleCopyAddress}
-          disabled={!navigationAddress}
-          className="flex-1 rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          {copied ? 'Endereço copiado!' : navigationAddress ? 'Copiar endereço' : 'Endereço pendente'}
-        </button>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex-1 rounded-lg bg-brand-500 py-2 text-sm font-medium text-white hover:bg-brand-600"
-        >
-          Confirmar entrega
-        </button>
-      </div>}
+      {order.status === 'em_rota' && (
+        <div className="space-y-2">
+          {navigationApp === 'waze' && (
+            navigationAddress
+              ? (
+                  <a
+                    href={buildWazeDestinationUrl(navigationAddress)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full rounded-lg bg-blue-600 py-2 text-center text-sm font-semibold text-white hover:bg-blue-700"
+                  >
+                    Iniciar rota
+                  </a>
+                )
+              : (
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full rounded-lg bg-gray-300 py-2 text-sm font-semibold text-gray-600"
+                  >
+                    Iniciar rota
+                  </button>
+                )
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={handleCopyAddress}
+              disabled={!navigationAddress}
+              className="flex-1 rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              {copied ? 'Endereço copiado!' : navigationAddress ? 'Copiar endereço' : 'Endereço pendente'}
+            </button>
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex-1 rounded-lg bg-brand-500 py-2 text-sm font-medium text-white hover:bg-brand-600"
+            >
+              Confirmar entrega
+            </button>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <ConfirmDeliveryModal

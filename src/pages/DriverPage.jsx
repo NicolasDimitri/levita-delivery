@@ -6,7 +6,6 @@ import DeliveryCard from '../components/DeliveryCard';
 import AvailableOrderCard from '../components/AvailableOrderCard';
 import { useApi } from '../lib/useApi';
 import {
-  buildWazeDestinationUrl,
   buildGoogleMapsRouteBatches,
   getGoogleMapsDestination,
   STORE_RETURN_ADDRESS
@@ -201,13 +200,10 @@ export default function DriverPage() {
       ...routeStops.map((stop) => stop.destination),
       STORE_RETURN_ADDRESS
     ]);
-  const wazeStops = [
-    ...routeStops.map((stop) => ({
-      label: stop.order.customer_name || 'Entrega',
-      destination: stop.destination
-    })),
-    { label: 'Retorno à loja', destination: STORE_RETURN_ADDRESS }
-  ];
+  const showFixedActions = tab === 'ativas' && (
+    readyOrdersToDispatch.length > 0 ||
+    (navigationApp === 'google-maps' && routeOrders.length > 0)
+  );
 
   function selectNavigationApp(app) {
     setNavigationApp(app);
@@ -283,7 +279,7 @@ export default function DriverPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-md px-4 pt-4">
+      <div className={`mx-auto max-w-md px-4 pt-4 ${showFixedActions ? 'pb-40' : ''}`}>
         {tab === 'disponiveis' && (
           <div className="space-y-3">
             {availableOrdersError && (
@@ -326,27 +322,10 @@ export default function DriverPage() {
             {loading && <p className="text-sm text-gray-400">Carregando...</p>}
             {orders.length > 0 && (
               <div className="mb-3">
-                {readyOrdersToDispatch.length > 0 && (
-                  <div className="mb-3 space-y-2">
-                    <button
-                      type="button"
-                      onClick={dispatchReadyOrders}
-                      disabled={dispatching}
-                      className="w-full rounded-lg bg-purple-600 py-2.5 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-60"
-                    >
-                      {dispatching
-                        ? 'Despachando seus pedidos...'
-                        : `Despachar ${readyOrdersToDispatch.length} pedido(s) pronto(s) ao iFood`}
-                    </button>
-                    <p className="text-center text-xs text-gray-500">
-                      Serão enviados apenas pedidos prontos atribuídos a você.
-                    </p>
-                  </div>
-                )}
                 {dispatchMessage && (
                   <p className="mb-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{dispatchMessage}</p>
                 )}
-                {routeOrders.length > 0 && ordersWithoutAddress === 0 && (
+                {routeOrders.length > 0 && (
                   <div className="space-y-2">
                     <div className="flex gap-2">
                       {[
@@ -368,61 +347,7 @@ export default function DriverPage() {
                         </button>
                       ))}
                     </div>
-                    {navigationApp === 'google-maps' && route.batches.length > 0 && route.failedIndex < 0 ? (
-                      route.batches.map((batch, index) => (
-                        <a
-                          key={`${index}-${batch.url}`}
-                          href={batch.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
-                        >
-                          Abrir rota no Google Maps
-                          {route.batches.length > 1 ? ` (${index + 1}/${route.batches.length})` : ''}
-                          {' '}· {batch.stops.length} paradas
-                        </a>
-                      ))
-                    ) : navigationApp === 'waze' ? (
-                      <>
-                        <p className="text-center text-xs text-gray-500">
-                          O Waze abre um destino por vez. Selecione cada parada conforme avançar na rota.
-                        </p>
-                        {wazeStops.map((stop, index) => (
-                          <a
-                            key={`${index}-${stop.destination}`}
-                            href={buildWazeDestinationUrl(stop.destination)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
-                          >
-                            {index + 1}. Navegar no Waze: {stop.label}
-                          </a>
-                        ))}
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled
-                        className="w-full rounded-lg bg-gray-300 py-2.5 text-sm font-semibold text-gray-600"
-                      >
-                        Rota indisponível: verifique os endereços
-                      </button>
-                    )}
                   </div>
-                )}
-                {routeOrders.length > 0 && ordersWithoutAddress > 0 ? (
-                  <button
-                    type="button"
-                    disabled
-                    className="w-full rounded-lg bg-gray-300 py-2.5 text-sm font-semibold text-gray-600"
-                  >
-                    Rota indisponível: verifique os endereços
-                  </button>
-                ) : null}
-                {routeOrders.length > 0 && (
-                  <p className="mt-1 text-center text-xs text-gray-500">
-                    Rota com pedidos despachados para você; retorno à loja ao final.
-                  </p>
                 )}
                 {ordersWithoutAddress > 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
@@ -447,7 +372,14 @@ export default function DriverPage() {
               </div>
             )}
             <div className="space-y-3">
-              {orders.map(o => <DeliveryCard key={o.id} order={o} onChanged={loadOrders} />)}
+              {orders.map(o => (
+                <DeliveryCard
+                  key={o.id}
+                  order={o}
+                  navigationApp={navigationApp}
+                  onChanged={loadOrders}
+                />
+              ))}
             </div>
           </>
         )}
@@ -518,6 +450,47 @@ export default function DriverPage() {
           </div>
         )}
       </div>
+      {showFixedActions && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 pt-3 pb-4 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] backdrop-blur">
+          <div className="mx-auto max-w-md space-y-2">
+            {readyOrdersToDispatch.length > 0 && (
+              <button
+                type="button"
+                onClick={dispatchReadyOrders}
+                disabled={dispatching}
+                className="w-full rounded-lg bg-purple-600 py-3 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-60"
+              >
+                {dispatching ? 'Despachando pedidos...' : 'Despachar pedidos prontos'}
+              </button>
+            )}
+            {navigationApp === 'google-maps' && routeOrders.length > 0 && (
+              route.batches.length > 0 && route.failedIndex < 0 && ordersWithoutAddress === 0
+                ? route.batches.map((batch, index) => (
+                    <a
+                      key={`${index}-${batch.url}`}
+                      href={batch.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full rounded-lg bg-blue-600 py-3 text-center text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      Iniciar rota
+                      {route.batches.length > 1 ? ` (${index + 1}/${route.batches.length})` : ''}
+                      {' '}· {batch.stops.length} paradas
+                    </a>
+                  ))
+                : (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full rounded-lg bg-gray-300 py-3 text-sm font-semibold text-gray-600"
+                    >
+                      Rota indisponível: verifique os endereços
+                    </button>
+                  )
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
