@@ -16,16 +16,12 @@ function getCancellationCode(reason) {
 export default function OrderCard({ order, drivers, onChanged }) {
   const { call } = useApi();
   const [loadingKey, setLoadingKey] = useState(null);
-  const [selectedDriver, setSelectedDriver] = useState(order.driver_id || '');
+  const [showDriverSelector, setShowDriverSelector] = useState(false);
   const [cancellationReasons, setCancellationReasons] = useState([]);
   const [selectedCancellation, setSelectedCancellation] = useState('');
   const [routeAddress, setRouteAddress] = useState(order.route_address || '');
   const [error, setError] = useState('');
   const [cancellationPending, setCancellationPending] = useState(false);
-
-  useEffect(() => {
-    setSelectedDriver(order.driver_id || '');
-  }, [order.driver_id]);
 
   useEffect(() => {
     setRouteAddress(order.route_address || '');
@@ -44,13 +40,21 @@ export default function OrderCard({ order, drivers, onChanged }) {
   }
 
   const accept   = () => run('accept',  () => call('/api/ifood/confirm',  { body: { orderId: order.id } }));
-  const dispatch = () => run('dispatch', () => call('/api/ifood/dispatch', { body: { orderId: order.id } }));
   const reconcileDispatch = () => {
     if (window.confirm(
       'Confirme que este pedido já aparece como despachado ou em rota no Gestor de Pedidos do iFood. Esta ação só atualizará o status nesta aplicação.'
     )) {
       run('reconcile', () => call('/api/ifood/dispatch', {
         body: { orderId: order.id, action: 'reconcile-dispatch' }
+      }));
+    }
+  };
+  const releaseDispatch = () => {
+    if (window.confirm(
+      'Aguarde pelo menos 30 segundos após o início do despacho e confirme no Gestor de Pedidos do iFood que este pedido NÃO foi despachado. Só então libere uma nova tentativa.'
+    )) {
+      run('release-dispatch', () => call('/api/ifood/dispatch', {
+        body: { orderId: order.id, action: 'release-dispatch' }
       }));
     }
   };
@@ -90,10 +94,20 @@ export default function OrderCard({ order, drivers, onChanged }) {
     if (updateError) throw updateError;
   });
 
-  const assignDriver = () => {
-    if (!selectedDriver) return setError('Selecione um entregador primeiro.');
-    run('assign', () => call('/api/ifood/assign-driver', {
-      body: { orderId: order.id, driverId: selectedDriver }
+  const assignDriver = (driverId) => {
+    run('assign', async () => {
+      await call('/api/ifood/assign-driver', {
+        body: { orderId: order.id, driverId }
+      });
+      setShowDriverSelector(false);
+    });
+  };
+  const unassignDriver = () => {
+    if (!window.confirm(
+      'Desvincular este pedido do entregador atual? O pedido ficará disponível para todos os entregadores aceitarem. Se já foi despachado ao iFood, ele não será despachado novamente.'
+    )) return;
+    run('unassign', () => call('/api/ifood/assign-driver', {
+      body: { orderId: order.id, driverId: null }
     }));
   };
 
@@ -178,6 +192,92 @@ export default function OrderCard({ order, drivers, onChanged }) {
         </p>
       )}
 
+      {order.driver_id && ['recebido', 'em_preparo', 'pronto', 'em_rota'].includes(order.status) && (
+        <div className="space-y-2 border-t border-gray-100 pt-3">
+          <p className="text-xs text-gray-500">
+            Entregador: <span className="font-medium text-gray-700">{driverName || 'Indisponível'}</span>
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setShowDriverSelector(value => !value)}
+              disabled={Boolean(order.ifood_dispatching_at && order.status === 'pronto')}
+              className="flex-1"
+            >
+              {showDriverSelector ? 'Cancelar troca' : 'Trocar'}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={unassignDriver}
+              disabled={loading('unassign') || Boolean(order.ifood_dispatching_at)}
+              className="flex-1"
+            >
+              {loading('unassign') ? 'Desvinculando...' : 'Desvincular'}
+            </Button>
+          </div>
+          {showDriverSelector && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+              onClick={() => !loading('assign') && setShowDriverSelector(false)}
+            >
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={`driver-selector-title-${order.id}`}
+                className="max-h-[85vh] w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+                onClick={event => event.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-gray-100 p-4">
+                  <div>
+                    <h2 id={`driver-selector-title-${order.id}`} className="font-semibold text-gray-800">
+                      Trocar entregador
+                    </h2>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Pedido {order.display_id ? `#${order.display_id}` : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDriverSelector(false)}
+                    disabled={loading('assign')}
+                    aria-label="Fechar seleção de entregador"
+                    className="rounded-full px-3 py-1 text-xl text-gray-400 hover:bg-gray-100 disabled:opacity-50"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="max-h-[65vh] space-y-2 overflow-y-auto p-4">
+                  {drivers.filter(driver => driver.id !== order.driver_id).length === 0 ? (
+                    <p className="py-6 text-center text-sm text-gray-500">
+                      Não há outros entregadores cadastrados para selecionar.
+                    </p>
+                  ) : drivers.filter(driver => driver.id !== order.driver_id).map(driver => (
+                    <button
+                      key={driver.id}
+                      type="button"
+                      onClick={() => assignDriver(driver.id)}
+                      disabled={loading('assign') || Boolean(order.ifood_dispatching_at && order.status === 'pronto')}
+                      className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-left hover:border-brand-300 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span>
+                        <span className="block text-sm font-medium text-gray-800">{driver.name}</span>
+                        {driver.phone && <span className="mt-0.5 block text-xs text-gray-500">{driver.phone}</span>}
+                      </span>
+                      {loading('assign') && <span className="text-xs text-gray-500">Trocando...</span>}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </div>
+          )}
+        </div>
+      )}
+      {!order.driver_id && ['recebido', 'em_preparo', 'pronto'].includes(order.status) && (
+        <p className="border-t border-gray-100 pt-3 text-xs text-amber-700">
+          Aguardando um entregador aceitar este pedido.
+        </p>
+      )}
+
       {/* ações por status */}
       {['recebido', 'em_preparo', 'pronto'].includes(order.status) && (
         <div className="space-y-2">
@@ -222,37 +322,27 @@ export default function OrderCard({ order, drivers, onChanged }) {
 
       {order.status === 'pronto' && (
         <div className="space-y-2">
-          <div className="flex gap-2">
-            <select value={selectedDriver} onChange={e => setSelectedDriver(e.target.value)}
-              disabled={Boolean(order.ifood_dispatched_at)}
-              className="flex-1 rounded-xl border-2 border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none disabled:bg-gray-100">
-              <option value="">Selecionar entregador</option>
-              {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-            <Button variant="primary" onClick={assignDriver} disabled={loading('assign') || Boolean(order.ifood_dispatched_at)}>
-              {loading('assign') ? 'Salvando...' : order.driver_id ? 'Trocar' : 'Atribuir'}
-            </Button>
-          </div>
-          {driverName && <p className="text-xs text-gray-400">Atribuído: {driverName}</p>}
-          {!order.driver_id && <p className="text-xs text-amber-700">Atribua um entregador antes de despachar.</p>}
-          {order.driver_id && selectedDriver !== order.driver_id && (
-            <p className="text-xs text-amber-700">Salve a nova atribuição antes de despachar.</p>
-          )}
-          {order.ifood_dispatched_at && (
+          {order.ifood_dispatching_at && !order.ifood_dispatched_at && (
             <p className="text-xs text-amber-700">
-              Despacho solicitado ao iFood; aguardando confirmação.
+              Não foi possível confirmar a resposta do iFood. Confira o pedido no Gestor de Pedidos antes de escolher uma ação.
             </p>
           )}
-          {order.ifood_dispatched_at ? (
-            <Button variant="blue" size="lg" onClick={reconcileDispatch}
-              disabled={loading('reconcile') || !order.driver_id}>
-              {loading('reconcile') ? 'Sincronizando...' : 'Sincronizar após confirmar no iFood'}
-            </Button>
-          ) : (
-            <Button variant="blue" size="lg" onClick={() => dispatch()}
-              disabled={loading('dispatch') || !order.driver_id || selectedDriver !== order.driver_id}>
-              {loading('dispatch') ? 'Despachando...' : 'Despachar pro iFood'}
-            </Button>
+          {order.ifood_dispatched_at && (
+            <p className="text-xs text-amber-700">Despacho solicitado ao iFood; aguardando confirmação.</p>
+          )}
+          {(order.ifood_dispatched_at || order.ifood_dispatching_at) && (
+            <div className="space-y-2">
+              <Button variant="blue" size="lg" onClick={reconcileDispatch}
+                disabled={loading('reconcile') || loading('release-dispatch')}>
+                {loading('reconcile') ? 'Sincronizando...' : 'Confirmar despacho no iFood'}
+              </Button>
+              {order.ifood_dispatching_at && !order.ifood_dispatched_at && (
+                <Button variant="danger" onClick={releaseDispatch}
+                  disabled={loading('reconcile') || loading('release-dispatch')}>
+                  {loading('release-dispatch') ? 'Liberando...' : 'Liberar nova tentativa'}
+                </Button>
+              )}
+            </div>
           )}
         </div>
       )}
