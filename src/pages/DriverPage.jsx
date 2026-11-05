@@ -3,16 +3,31 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import DeliveryCard from '../components/DeliveryCard';
+import AvailableOrderCard from '../components/AvailableOrderCard';
+import { useApi } from '../lib/useApi';
 import {
   buildGoogleMapsRouteBatches,
   getGoogleMapsDestination,
   STORE_RETURN_ADDRESS
 } from '../../lib/deliveryAddress';
 
+const NAVIGATION_APP_STORAGE_KEY = 'delivery-navigation-app';
+
+function getPreferredNavigationApp() {
+  try {
+    return window.localStorage.getItem(NAVIGATION_APP_STORAGE_KEY) === 'waze' ? 'waze' : 'google-maps';
+  } catch (error) {
+    console.warn('Não foi possível ler a preferência de aplicativo de navegação', error);
+    return 'google-maps';
+  }
+}
+
 export default function DriverPage() {
   const { signOut, profile, session } = useAuth();
+  const { call } = useApi();
   const [tab, setTab] = useState('ativas');
   const [orders, setOrders] = useState([]);
+  const [availableOrders, setAvailableOrders] = useState([]);
   const [finishedOrders, setFinishedOrders] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
   const [balance, setBalance] = useState(0);
@@ -20,14 +35,19 @@ export default function DriverPage() {
   const [loading, setLoading] = useState(true);
   const [withdrawNote, setWithdrawNote] = useState('');
   const [ordersError, setOrdersError] = useState('');
+  const [availableOrdersError, setAvailableOrdersError] = useState('');
   const [balanceError, setBalanceError] = useState('');
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchMessage, setDispatchMessage] = useState('');
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [navigationApp, setNavigationApp] = useState(getPreferredNavigationApp);
 
   const loadOrders = useCallback(async () => {
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
       .eq('driver_id', session.user.id)
-      .in('status', ['pronto', 'em_rota'])
+      .in('status', ['recebido', 'em_preparo', 'pronto', 'em_rota'])
       .order('assigned_at', { ascending: true });
     if (error) {
       setOrdersError('Não foi possível carregar suas entregas. Atualize a página ou tente novamente.');
@@ -38,6 +58,17 @@ export default function DriverPage() {
     setOrders(data || []);
     setLoading(false);
   }, [session]);
+
+  const loadAvailableOrders = useCallback(async () => {
+    const { data, error } = await supabase.rpc('get_available_delivery_orders');
+    if (error) {
+      console.error('Não foi possível carregar os pedidos disponíveis', error);
+      setAvailableOrdersError('Não foi possível carregar os pedidos disponíveis. Atualize a página ou tente novamente.');
+      return;
+    }
+    setAvailableOrdersError('');
+    setAvailableOrders(data || []);
+  }, []);
 
   const loadFinishedOrders = useCallback(async () => {
     const { data } = await supabase
@@ -88,12 +119,18 @@ export default function DriverPage() {
 
   useEffect(() => {
     loadOrders();
+    loadAvailableOrders();
     loadBalance();
     const channel = supabase
       .channel('driver-orders')
       .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'orders', filter: `driver_id=eq.${session.user.id}` },
-        () => { loadOrders(); loadBalance(); if (tab === 'finalizadas') loadFinishedOrders(); }
+        { event: '*', schema: 'public', table: 'orders' },
+        () => {
+          loadOrders();
+          loadAvailableOrders();
+          loadBalance();
+          if (tab === 'finalizadas') loadFinishedOrders();
+        }
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'delivery_history', filter: `driver_id=eq.${session.user.id}` },
@@ -103,32 +140,107 @@ export default function DriverPage() {
         { event: '*', schema: 'public', table: 'withdrawals', filter: `driver_id=eq.${session.user.id}` },
         () => { loadBalance(); if (tab === 'saque') loadWithdrawals(); }
       )
-      .subscribe();
-    return () => supabase.removeChannel(channel);
-  }, [loadOrders, loadBalance, loadFinishedOrders, loadWithdrawals, session, tab]);
+      .subscribe((status, error) => {
+        const connected = status === 'SUBSCRIBED';
+        setRealtimeConnected(connected);
+        if (error || ['CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+          console.error('Realtime de entregas indisponível; sincronização periódica continuará ativa', {
+            status,
+            error: error?.message || null
+          });
+        }
+      });
+    return () => {
+      setRealtimeConnected(false);
+      supabase.removeChannel(channel);
+    };
+  }, [loadOrders, loadAvailableOrders, loadBalance, loadFinishedOrders, loadWithdrawals, session, tab]);
 
   useEffect(() => {
     if (tab === 'finalizadas') loadFinishedOrders();
     if (tab === 'saque') loadWithdrawals();
   }, [tab, loadFinishedOrders, loadWithdrawals]);
 
+  const hasPendingDispatch = orders.some(order =>
+    order.status === 'pronto' && (order.ifood_dispatched_at || order.ifood_dispatching_at)
+  );
+
+  useEffect(() => {
+    if (tab !== 'disponiveis') return undefined;
+    const intervalId = window.setInterval(loadAvailableOrders, 10000);
+    return () => window.clearInterval(intervalId);
+  }, [tab, loadAvailableOrders]);
+
+  useEffect(() => {
+    if (tab !== 'ativas' || (realtimeConnected && !hasPendingDispatch)) return undefined;
+    const intervalId = window.setInterval(loadOrders, 10000);
+    return () => window.clearInterval(intervalId);
+  }, [tab, loadOrders, realtimeConnected, hasPendingDispatch]);
+
   const tabs = [
-    { id: 'ativas',     label: `Entregas${orders.length > 0 ? ` (${orders.length})` : ''}` },
+    { id: 'disponiveis', label: `Disponíveis${availableOrders.length > 0 ? ` (${availableOrders.length})` : ''}` },
+    { id: 'ativas',     label: `Minhas entregas${orders.length > 0 ? ` (${orders.length})` : ''}` },
     { id: 'finalizadas', label: 'Finalizadas' },
     { id: 'saque',      label: 'Carteira' },
   ];
 
-  const routeStops = orders.map((order) => ({
+  const routeOrders = orders.filter((order) => order.status === 'em_rota');
+  const readyOrdersToDispatch = orders.filter((order) =>
+    order.status === 'pronto' && !order.ifood_dispatched_at && !order.ifood_dispatching_at
+  );
+  const ordersWaitingForReady = orders.filter((order) => ['recebido', 'em_preparo'].includes(order.status));
+  const routeStops = routeOrders.map((order) => ({
     order,
     ...getGoogleMapsDestination(order)
   }));
   const ordersWithoutAddress = routeStops.filter((stop) => !stop.destination).length;
-  const route = ordersWithoutAddress
+  const route = routeOrders.length === 0 || ordersWithoutAddress
     ? { batches: [], failedIndex: -1 }
     : buildGoogleMapsRouteBatches([
       ...routeStops.map((stop) => stop.destination),
       STORE_RETURN_ADDRESS
     ]);
+  const showFixedActions = tab === 'ativas' && (
+    readyOrdersToDispatch.length > 0 ||
+    (navigationApp === 'google-maps' && routeOrders.length > 0)
+  );
+
+  function selectNavigationApp(app) {
+    setNavigationApp(app);
+    try {
+      window.localStorage.setItem(NAVIGATION_APP_STORAGE_KEY, app);
+    } catch (error) {
+      console.warn('Não foi possível salvar a preferência de aplicativo de navegação', error);
+    }
+  }
+
+  async function dispatchReadyOrders() {
+    const orderIds = readyOrdersToDispatch.map((order) => order.id);
+    if (orderIds.length === 0 || orderIds.length > 3) return;
+
+    setDispatching(true);
+    setDispatchMessage('');
+    try {
+      const { results = [] } = await call('/api/ifood/dispatch', { body: { orderIds } });
+      const dispatchedCount = results.filter((result) => result.status === 'dispatched').length;
+      const pendingResults = results.filter((result) => result.status === 'pending' || result.status === 'uncertain');
+      const failedResults = results.filter((result) => result.status === 'failed');
+      const parts = [`Despachados ao iFood: ${dispatchedCount}.`];
+      if (pendingResults.length) {
+        parts.push(`${pendingResults.length} aguardando conferência no iFood.`);
+      }
+      if (failedResults.length) {
+        parts.push(`${failedResults.length} falha(s): ${failedResults.map((item) => item.error).join(' ')}`);
+      }
+      setDispatchMessage(parts.join(' '));
+      await loadOrders();
+      await loadAvailableOrders();
+    } catch (error) {
+      setDispatchMessage(error.message);
+    } finally {
+      setDispatching(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-8">
@@ -167,49 +279,73 @@ export default function DriverPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-md px-4 pt-4">
+      <div className={`mx-auto max-w-md px-4 pt-4 ${showFixedActions ? 'pb-40' : ''}`}>
+        {tab === 'disponiveis' && (
+          <div className="space-y-3">
+            {availableOrdersError && (
+              <p className="rounded-xl bg-red-50 p-3 text-sm text-red-600">{availableOrdersError}</p>
+            )}
+            {orders.length >= 3 && (
+              <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+                Você já atingiu o limite de 3 pedidos ativos.
+              </p>
+            )}
+            {availableOrders.length === 0
+              ? <div className="mt-8 rounded-2xl border border-dashed border-gray-300 p-10 text-center">
+                  <p className="text-sm text-gray-400">Nenhum pedido disponível no momento.</p>
+                </div>
+              : availableOrders.map((order) => (
+                  <AvailableOrderCard
+                    key={order.id}
+                    order={order}
+                    activeCount={orders.length}
+                    onAccepted={() => { loadOrders(); loadAvailableOrders(); }}
+                  />
+                ))}
+          </div>
+        )}
+
         {/* aba: em rota */}
         {tab === 'ativas' && (
           <>
             {ordersError && (
               <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-600">{ordersError}</p>
             )}
-            {loading && <p className="text-sm text-gray-400">Carregando...</p>}
-            {!loading && orders.length === 0 && (
-              <div className="mt-8 rounded-2xl border border-dashed border-gray-300 p-10 text-center">
-                <p className="text-sm text-gray-400">Nenhuma entrega em rota agora.</p>
-              </div>
+            {!realtimeConnected && (
+              <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+                Atualização em tempo real indisponível; sincronizando automaticamente a cada 10 segundos.
+              </p>
             )}
+            {loading && <p className="text-sm text-gray-400">Carregando...</p>}
             {orders.length > 0 && (
               <div className="mb-3">
-                {route.batches.length > 0 && route.failedIndex < 0 ? (
-                  <div className="space-y-2">
-                    {route.batches.map((batch, index) => (
-                      <a
-                        key={`${index}-${batch.url}`}
-                        href={batch.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block w-full rounded-lg bg-blue-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-blue-700"
-                      >
-                        Abrir rota no Google Maps
-                        {route.batches.length > 1 ? ` (${index + 1}/${route.batches.length})` : ''}
-                        {' '}· {batch.stops.length} paradas
-                      </a>
-                    ))}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    disabled
-                    className="w-full rounded-lg bg-gray-300 py-2.5 text-sm font-semibold text-gray-600"
-                  >
-                    Rota indisponível: verifique os endereços
-                  </button>
+                {dispatchMessage && (
+                  <p className="mb-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{dispatchMessage}</p>
                 )}
-                <p className="mt-1 text-center text-xs text-gray-500">
-                  Início na sua localização atual; entregas na ordem e retorno à loja no final.
-                </p>
+                {routeOrders.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      {[
+                        { id: 'google-maps', label: 'Google Maps' },
+                        { id: 'waze', label: 'Waze' }
+                      ].map((app) => (
+                        <button
+                          key={app.id}
+                          type="button"
+                          aria-pressed={navigationApp === app.id}
+                          onClick={() => selectNavigationApp(app.id)}
+                          className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
+                            navigationApp === app.id
+                              ? 'border-blue-600 bg-blue-50 text-blue-700'
+                              : 'border-gray-300 bg-white text-gray-600'
+                          }`}
+                        >
+                          {app.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {ordersWithoutAddress > 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
                     {ordersWithoutAddress} entrega(s) aguardando endereço correto cadastrado pelo administrador.
@@ -220,10 +356,27 @@ export default function DriverPage() {
                     Não foi possível criar a rota a partir da parada {route.failedIndex + 1}; confira o tamanho ou conteúdo do endereço.
                   </p>
                 )}
+                {ordersWaitingForReady.length > 0 && (
+                  <p className="mt-1 text-center text-xs text-amber-700">
+                    {ordersWaitingForReady.length} pedido(s) aguardando o despacho marcar como pronto.
+                  </p>
+                )}
+              </div>
+            )}
+            {!loading && orders.length === 0 && (
+              <div className="mt-8 rounded-2xl border border-dashed border-gray-300 p-10 text-center">
+                <p className="text-sm text-gray-400">Você ainda não aceitou entregas.</p>
               </div>
             )}
             <div className="space-y-3">
-              {orders.map(o => <DeliveryCard key={o.id} order={o} onChanged={loadOrders} />)}
+              {orders.map(o => (
+                <DeliveryCard
+                  key={o.id}
+                  order={o}
+                  navigationApp={navigationApp}
+                  onChanged={loadOrders}
+                />
+              ))}
             </div>
           </>
         )}
@@ -294,6 +447,47 @@ export default function DriverPage() {
           </div>
         )}
       </div>
+      {showFixedActions && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 pt-3 pb-4 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] backdrop-blur">
+          <div className="mx-auto max-w-md space-y-2">
+            {readyOrdersToDispatch.length > 0 && (
+              <button
+                type="button"
+                onClick={dispatchReadyOrders}
+                disabled={dispatching}
+                className="w-full rounded-lg bg-purple-600 py-3 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-60"
+              >
+                {dispatching ? 'Despachando pedidos...' : 'Despachar pedidos prontos'}
+              </button>
+            )}
+            {navigationApp === 'google-maps' && routeOrders.length > 0 && (
+              route.batches.length > 0 && route.failedIndex < 0 && ordersWithoutAddress === 0
+                ? route.batches.map((batch, index) => (
+                    <a
+                      key={`${index}-${batch.url}`}
+                      href={batch.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full rounded-lg bg-blue-600 py-3 text-center text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      Iniciar rota
+                      {route.batches.length > 1 ? ` (${index + 1}/${route.batches.length})` : ''}
+                      {' '}· {batch.stops.length} paradas
+                    </a>
+                  ))
+                : (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full rounded-lg bg-gray-300 py-3 text-sm font-semibold text-gray-600"
+                    >
+                      Rota indisponível: verifique os endereços
+                    </button>
+                  )
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
