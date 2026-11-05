@@ -12,6 +12,7 @@ create table public.profiles (
   role text not null check (role in ('admin', 'driver')),
   name text not null,
   phone text,
+  pix_key text,
   created_at timestamptz not null default now()
 );
 
@@ -26,7 +27,7 @@ begin
     return new;
   end if;
 
-  insert into public.profiles (id, role, name, phone)
+  insert into public.profiles (id, role, name, phone, pix_key)
   values (
     new.id,
     'driver',
@@ -35,7 +36,8 @@ begin
       nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
       'Entregador'
     ),
-    nullif(trim(new.raw_user_meta_data ->> 'phone'), '')
+    nullif(trim(new.raw_user_meta_data ->> 'phone'), ''),
+    nullif(trim(new.raw_user_meta_data ->> 'pix_key'), '')
   )
   on conflict (id) do nothing;
 

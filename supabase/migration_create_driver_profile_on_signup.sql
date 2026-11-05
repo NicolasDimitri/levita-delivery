@@ -2,6 +2,9 @@
 -- Required when email confirmation is enabled, because signup then has no
 -- authenticated session to insert into public.profiles from the client.
 
+alter table public.profiles
+  add column if not exists pix_key text;
+
 create or replace function public.create_driver_profile_for_new_user()
 returns trigger
 language plpgsql
@@ -13,7 +16,7 @@ begin
     return new;
   end if;
 
-  insert into public.profiles (id, role, name, phone)
+  insert into public.profiles (id, role, name, phone, pix_key)
   values (
     new.id,
     'driver',
@@ -22,7 +25,8 @@ begin
       nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
       'Entregador'
     ),
-    nullif(trim(new.raw_user_meta_data ->> 'phone'), '')
+    nullif(trim(new.raw_user_meta_data ->> 'phone'), ''),
+    nullif(trim(new.raw_user_meta_data ->> 'pix_key'), '')
   )
   on conflict (id) do nothing;
 
