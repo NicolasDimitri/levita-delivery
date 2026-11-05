@@ -9,6 +9,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { session, profile } = useAuth();
@@ -22,41 +23,49 @@ export default function SignupPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
+    setMessage('');
     setLoading(true);
 
-    const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
+    try {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            name: name.trim(),
+            phone: phone.trim(),
+            driver_signup: true
+          }
+        }
+      });
 
-    if (signUpError) {
-      setLoading(false);
-      setError(signUpError.message);
-      return;
-    }
-
-    // cria o perfil como 'driver' - a policy de RLS bloqueia qualquer tentativa
-    // de criar perfil com outro role pela tela pública
-    const userId = data.user?.id;
-    if (userId) {
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({ id: userId, role: 'driver', name, phone });
-
-      if (profileError) {
-        setLoading(false);
-        setError('Erro ao criar o perfil: ' + profileError.message);
+      if (signUpError) {
+        if (signUpError.code === 'user_already_exists') {
+          setError('Este e-mail já possui cadastro. Entre na sua conta.');
+        } else {
+          setError(signUpError.message);
+        }
         return;
       }
+
+      if (!data.user) {
+        setError('Não foi possível criar a conta. Tente novamente.');
+        return;
+      }
+
+      if (!data.session) {
+        if (data.user.identities?.length === 0) {
+          setError('Este e-mail já possui cadastro. Entre na sua conta.');
+        } else {
+          setMessage('Conta criada. Verifique seu e-mail para confirmar o cadastro antes de entrar.');
+        }
+      }
+    } catch (signupError) {
+      console.error('Falha ao criar conta de entregador', signupError);
+      setError('Não foi possível concluir o cadastro. Verifique sua conexão e tente novamente.');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
-
-    // se a confirmação de e-mail estiver habilitada no Supabase, ainda não há sessão aqui
-    if (!data.session) {
-      setError('Verifique seu e-mail para confirmar a conta antes de entrar.');
-      return;
-    }
-
-    // não navega aqui — o useEffect acima faz isso assim que o perfil
-    // (recém-criado) terminar de carregar no contexto
   }
 
   return (
@@ -108,7 +117,8 @@ export default function SignupPage() {
             />
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+          {message && <p role="status" className="text-sm text-green-700">{message}</p>}
 
           <button
             type="submit"
