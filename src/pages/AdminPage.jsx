@@ -29,6 +29,7 @@ export default function AdminPage() {
   const [drivers, setDrivers] = useState([]);
   const [driverBalances, setDriverBalances] = useState({});
   const [loadingWithdraw, setLoadingWithdraw] = useState(null);
+  const [copiedPixDriver, setCopiedPixDriver] = useState(null);
   const [withdrawError, setWithdrawError] = useState('');
   const [balanceError, setBalanceError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -140,6 +141,25 @@ export default function AdminPage() {
     await loadDriverBalances();
   }
 
+  async function copyDriverPix(driver) {
+    setWithdrawError('');
+    if (!driver.pix_key) {
+      setWithdrawError(`O entregador ${driver.name} ainda não cadastrou uma chave PIX.`);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(driver.pix_key);
+      setCopiedPixDriver(driver.id);
+      window.setTimeout(() => {
+        setCopiedPixDriver((current) => current === driver.id ? null : current);
+      }, 2000);
+    } catch (error) {
+      console.error('Não foi possível copiar a chave PIX', error);
+      setWithdrawError('Não foi possível copiar a chave PIX. Verifique a permissão da área de transferência do navegador.');
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-10">
       {/* cabeçalho */}
@@ -228,12 +248,26 @@ export default function AdminPage() {
                       </p>
                     </div>
                   </div>
-                  {balance > 0 && (
-                    <Button variant="success" size="lg" className="mt-3 w-full"
-                      onClick={() => registerWithdrawal(driver)} disabled={isPaying}>
-                      {isPaying ? 'Registrando...' : `Marcar R$ ${fmtBRL(balance)} como pago`}
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={() => copyDriverPix(driver)}
+                      disabled={!driver.pix_key}
+                    >
+                      {copiedPixDriver === driver.id ? 'PIX copiado!' : 'Copiar PIX'}
                     </Button>
-                  )}
+                    {balance > 0 && (
+                      <Button
+                        variant="success"
+                        className="flex-1"
+                        onClick={() => registerWithdrawal(driver)}
+                        disabled={isPaying}
+                      >
+                        {isPaying ? 'Registrando...' : `Marcar R$ ${fmtBRL(balance)} como pago`}
+                      </Button>
+                    )}
+                  </div>
                   {balance === 0 && (
                     <p className="mt-2 text-center text-xs text-gray-400">Saldo zerado ✓</p>
                   )}
