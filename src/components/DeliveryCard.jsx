@@ -50,6 +50,18 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
   // pendingValue: valor a cobrar na entrega, quando não é pago online
   const pendingValue =
     order.payment_category !== 'online' ? Number(order.payment_raw?.pending ?? order.total_value) : null;
+  const cashPayment = order.payment_raw?.methods?.find(
+    (method) => method.type === 'OFFLINE' && method.method === 'CASH'
+  );
+  const cashChangeFor = Number(cashPayment?.cash?.changeFor);
+  const cashChange = cashChangeFor - pendingValue;
+  const hasCashChangeFor = order.payment_category === 'dinheiro' &&
+    Number.isFinite(cashChangeFor) &&
+    cashChangeFor > 0;
+  const formatCurrency = (value) => Number(value).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -79,6 +91,14 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
 
       <div className="mb-3">
         <PaymentBadge category={order.payment_category} value={pendingValue} />
+        {hasCashChangeFor && (
+          <div className="mt-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-center text-sm text-blue-900">
+            <p>Cliente vai entregar: <strong>R$ {formatCurrency(cashChangeFor)}</strong></p>
+            {Number.isFinite(cashChange) && cashChange > 0 && (
+              <p>Troco: <strong>R$ {formatCurrency(cashChange)}</strong></p>
+            )}
+          </div>
+        )}
       </div>
 
       <ul className="mb-3 space-y-1 text-sm text-gray-700">
