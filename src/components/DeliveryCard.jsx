@@ -1,13 +1,35 @@
 // src/components/DeliveryCard.jsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import PaymentBadge from './PaymentBadge';
 import ConfirmDeliveryModal from './ConfirmDeliveryModal';
 import CountdownTimer from './CountdownTimer';
 import { buildWazeDestinationUrl, getOrderNavigationAddress } from '../../lib/deliveryAddress';
+import { useApi } from '../lib/useApi';
 
 export default function DeliveryCard({ order, navigationApp, onChanged }) {
   const [copied, setCopied] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [hasStoredCode, setHasStoredCode] = useState(false);
+  const { call } = useApi();
+
+  useEffect(() => {
+    let active = true;
+    setHasStoredCode(false);
+    if (order.status !== 'em_rota') return () => { active = false; };
+
+    call(`/api/ifood/order-meta?orderId=${order.id}`, { method: 'GET' })
+      .then(({ hasStoredCode: storedCode }) => {
+        if (active) setHasStoredCode(Boolean(storedCode));
+      })
+      .catch((error) => {
+        console.error('Não foi possível verificar se o pedido tem código salvo', {
+          orderId: order.id,
+          error
+        });
+      });
+
+    return () => { active = false; };
+  }, [call, order.id, order.status]);
 
   const navigationAddress = getOrderNavigationAddress(order);
   const streetAddress = [order.street, order.street_number].filter(Boolean).join(', ');
@@ -60,15 +82,25 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
             {order.route_address || fullAddress || 'Endereço não informado'}
           </p>
         </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-          order.status === 'em_rota'
-            ? 'bg-blue-100 text-blue-700'
-            : order.status === 'pronto'
-              ? 'bg-purple-100 text-purple-700'
-              : 'bg-amber-100 text-amber-700'
-        }`}>
-          {statusLabel}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+            order.status === 'em_rota'
+              ? 'bg-blue-100 text-blue-700'
+              : order.status === 'pronto'
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-amber-100 text-amber-700'
+          }`}>
+            {statusLabel}
+          </span>
+          {order.status === 'em_rota' && hasStoredCode && (
+            <span
+              title="Pode confirmar a entrega sem digitar o código"
+              className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-700"
+            >
+              Código salvo
+            </span>
+          )}
+        </div>
       </div>
 
       {order.status === 'em_rota' && order.delivery_date_time && (
