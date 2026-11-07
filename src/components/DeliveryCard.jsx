@@ -186,6 +186,7 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
       {showModal && (
         <ConfirmDeliveryModal
           order={order}
+          hasStoredCode={hasStoredCode}
           onClose={() => setShowModal(false)}
           onConfirmed={() => {
             setShowModal(false);

@@ -1,5 +1,5 @@
 // src/components/ConfirmDeliveryModal.jsx
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { extractDigitsFromSpeech } from '../lib/extractDigitsFromSpeech';
 
@@ -21,9 +21,7 @@ async function callApi(path, options = {}) {
   return json;
 }
 
-export default function ConfirmDeliveryModal({ order, onClose, onConfirmed }) {
-  const [hasStoredCode, setHasStoredCode] = useState(false);
-  const [checkingStoredCode, setCheckingStoredCode] = useState(true);
+export default function ConfirmDeliveryModal({ order, hasStoredCode, onClose, onConfirmed }) {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -116,13 +114,6 @@ export default function ConfirmDeliveryModal({ order, onClose, onConfirmed }) {
     }
   }
 
-  useEffect(() => {
-    callApi(`/api/ifood/order-meta?orderId=${order.id}`, { method: 'GET' })
-      .then((res) => setHasStoredCode(res.hasStoredCode))
-      .catch(() => setHasStoredCode(false))
-      .finally(() => setCheckingStoredCode(false));
-  }, [order.id]);
-
   async function handleConfirm({ useStoredCode }) {
     setLoading(true);
     setError('');
@@ -206,7 +197,7 @@ export default function ConfirmDeliveryModal({ order, onClose, onConfirmed }) {
             {loading ? 'Confirmando...' : 'Confirmar'}
           </button>
         </div>
-        {!checkingStoredCode && hasStoredCode && (
+        {hasStoredCode && (
           <button
             onClick={() => handleConfirm({ useStoredCode: true })}
             disabled={loading}
