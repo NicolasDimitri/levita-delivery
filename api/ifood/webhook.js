@@ -338,6 +338,8 @@ async function handlePlaced(event) {
       payment_raw: payments,
       total_value: order.total?.orderAmount ?? 0,
       delivery_fee: order.total?.deliveryFee ?? 0,
+      benefits_raw: order.benefits ?? [],
+      benefits_value: order.total?.benefits ?? 0,
       delivery_date_time: delivery.deliveryDateTime || null,
       status: 'recebido'
     })
