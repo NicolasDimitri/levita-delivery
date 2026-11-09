@@ -420,7 +420,7 @@ async function handlePlaced(event) {
 async function handleConcluded(event) {
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .select('id, status, driver_id, delivery_fee')
+    .select('id, status, driver_id')
     .eq('ifood_order_id', event.orderId)
     .maybeSingle();
   if (orderError) throw orderError;
