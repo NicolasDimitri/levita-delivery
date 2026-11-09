@@ -5,6 +5,7 @@ import ConfirmDeliveryModal from './ConfirmDeliveryModal';
 import CountdownTimer from './CountdownTimer';
 import { buildWazeDestinationUrl, getOrderNavigationAddress } from '../../lib/deliveryAddress';
 import { useApi } from '../lib/useApi';
+import OrderDiscounts from './OrderDiscounts';
 
 export default function DeliveryCard({ order, navigationApp, onChanged }) {
   const [copied, setCopied] = useState(false);
@@ -123,6 +124,7 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
 
       <div className="mb-3">
         <PaymentBadge category={order.payment_category} value={pendingValue} />
+        <OrderDiscounts benefits={order.benefits_raw} total={order.benefits_value} className="mt-2" />
         {hasCashChangeFor && (
           <div className="mt-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-center text-sm text-blue-900">
             <p>Cliente vai entregar: <strong>R$ {formatCurrency(cashChangeFor)}</strong></p>
