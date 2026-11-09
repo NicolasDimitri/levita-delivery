@@ -6,6 +6,7 @@ import CountdownTimer from './CountdownTimer';
 import { ORDER_STATUS, fmtBRL, fmtDate } from '../lib/constants';
 import { supabase } from '../supabaseClient';
 import { isMissingStreetNumber } from '../../lib/deliveryAddress';
+import OrderDiscounts from './OrderDiscounts';
 
 export { ORDER_STATUS };
 
@@ -155,6 +156,7 @@ export default function OrderCard({ order, drivers, onChanged }) {
           {order.payment_category}
         </Badge>
       </div>
+      <OrderDiscounts benefits={order.benefits_raw} total={order.benefits_value} />
 
       <ErrorMsg message={error} />
       {needsRouteAddress && !['entregue', 'cancelado'].includes(order.status) && (

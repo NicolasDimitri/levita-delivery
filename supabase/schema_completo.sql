@@ -89,6 +89,8 @@ create table public.orders (
   payment_raw      jsonb,
   total_value      numeric(10,2) not null default 0,
   delivery_fee     numeric(10,2) not null default 0,
+  benefits_raw     jsonb not null default '[]'::jsonb,
+  benefits_value   numeric(10,2) not null default 0,
   delivery_date_time timestamptz,
   status           text not null default 'recebido'
     check (status in ('recebido','em_preparo','pronto','em_rota','entregue','cancelado')),
