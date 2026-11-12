@@ -376,22 +376,41 @@ async function handlePlaced(event) {
     });
     throw error;
   }
+
+  let savedSubtotal = insertedOrder.subtotal;
+  if (savedSubtotal == null) {
+    const { data: updatedOrder, error: subtotalUpdateError } = await supabaseAdmin
+      .from('orders')
+      .update({ subtotal: order })
+      .eq('id', insertedOrder.id)
+      .select('subtotal')
+      .single();
+    if (subtotalUpdateError) {
+      console.error('=== [WEBHOOK] FALHA AO ATUALIZAR SNAPSHOT DO PEDIDO ===', {
+        eventId: event.id,
+        orderId: order.id,
+        code: subtotalUpdateError.code,
+        message: subtotalUpdateError.message,
+        details: subtotalUpdateError.details
+      });
+      throw subtotalUpdateError;
+    }
+    savedSubtotal = updatedOrder.subtotal;
+  }
+
+  if (savedSubtotal == null) {
+    throw new Error(`O banco não persistiu o snapshot do pedido ${order.id} na coluna subtotal`);
+  }
+
   console.log('=== [WEBHOOK] pedido criado no Supabase ===', {
     eventId: event.id,
     orderId: order.id,
     localOrderId: insertedOrder.id,
     displayId: order.displayId,
-    hasSubtotalSnapshot: Boolean(insertedOrder.subtotal),
+    hasSubtotalSnapshot: true,
     orderFields: Object.keys(order),
     totalFields: Object.keys(order.total || {})
   });
-  if (insertedOrder.subtotal == null) {
-    console.warn('=== [WEBHOOK] subtotal ausente no retorno de detalhes do iFood ===', {
-      eventId: event.id,
-      orderId: order.id,
-      totalFields: Object.keys(order.total || {})
-    });
-  }
 
   // NOTA: os nomes de campo abaixo (item.options, item.unitPrice) seguem o formato
   // documentado publicamente, mas vale conferir com um pedido de teste real no
