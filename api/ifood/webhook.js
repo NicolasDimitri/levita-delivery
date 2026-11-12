@@ -308,7 +308,7 @@ async function handlePlaced(event) {
 
   const payments = order.payment || order.payments;
   const paymentCategory = classifyPayment(payments);
-  const serviceFee = await tryGetFinancialServiceFee({
+  const serviceFee = getOrderServiceFee(order) ?? await tryGetFinancialServiceFee({
     event,
     merchantId: order.merchant?.id,
     orderId: order.id,
@@ -609,7 +609,8 @@ async function syncOrderSubtotal(order, event) {
 async function syncFinancialServiceFee(order, event) {
   if (order.service_fee != null) return;
 
-  const serviceFee = await tryGetFinancialServiceFee({
+  const orderDetails = await getOrderDetails(order.ifood_order_id);
+  const serviceFee = getOrderServiceFee(orderDetails) ?? await tryGetFinancialServiceFee({
     event,
     merchantId: order.merchant_id,
     orderId: order.ifood_order_id,
@@ -630,6 +631,25 @@ async function syncFinancialServiceFee(order, event) {
     orderId: order.ifood_order_id,
     serviceFee
   });
+}
+
+function getOrderServiceFee(order) {
+  const fees = Array.isArray(order?.additionalFees) ? order.additionalFees : [];
+  const serviceFees = fees.filter(
+    (fee) => typeof fee?.description === 'string' &&
+      fee.description.trim().toLocaleLowerCase('pt-BR') === 'taxa de serviço'
+  );
+  if (serviceFees.length === 0) return null;
+
+  const values = serviceFees.map((fee) => {
+    const rawValue = typeof fee.value === 'object' && fee.value !== null
+      ? fee.value.value
+      : fee.value;
+    const amount = Number(rawValue);
+    return Number.isFinite(amount) ? amount : null;
+  });
+  if (values.some((value) => value == null)) return null;
+  return values.reduce((total, value) => total + value, 0);
 }
 
 async function tryGetFinancialServiceFee({
