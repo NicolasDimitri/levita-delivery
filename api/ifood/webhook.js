@@ -24,6 +24,13 @@ function readRawBody(req) {
   });
 }
 
+function getIfoodMoneyValue(value) {
+  const rawValue = typeof value === 'object' && value !== null ? value.value : value;
+  if (rawValue == null || rawValue === '') return null;
+  const amount = Number(rawValue);
+  return Number.isFinite(amount) ? amount : null;
+}
+
 function isValidSignature(rawBody, signatureHeader) {
   if (!signatureHeader) return false;
 
@@ -258,6 +265,7 @@ async function updateOrderStatusFromEvent(event, targetStatus, allowedStatuses, 
 
 async function handleConfirmed(event) {
   await updateOrderStatusFromEvent(event, 'em_preparo', ['recebido']);
+  await syncOrderSubtotalForOrder(event);
 }
 
 async function handleDispatched(event) {
@@ -265,11 +273,13 @@ async function handleDispatched(event) {
     ifood_dispatched_at: new Date().toISOString(),
     ifood_dispatching_at: null
   });
+  await syncOrderSubtotalForOrder(event);
   await syncFinancialServiceFeeForOrder(event);
 }
 
 async function handleReadyToPickup(event) {
   await updateOrderStatusFromEvent(event, 'pronto', ['em_preparo']);
+  await syncOrderSubtotalForOrder(event);
 }
 
 async function handlePlaced(event) {
@@ -346,7 +356,7 @@ async function handlePlaced(event) {
       payment_category: paymentCategory,
       payment_raw: payments,
       total_value: order.total?.orderAmount ?? 0,
-      subtotal: order.total?.subTotal ?? null,
+      subtotal: getIfoodMoneyValue(order.total?.subTotal),
       delivery_fee: order.total?.deliveryFee ?? 0,
       service_fee: serviceFee,
       benefits_raw: order.benefits ?? [],
@@ -373,8 +383,16 @@ async function handlePlaced(event) {
     eventId: event.id,
     orderId: order.id,
     localOrderId: insertedOrder.id,
-    displayId: order.displayId
+    displayId: order.displayId,
+    subtotal: insertedOrder.subtotal
   });
+  if (insertedOrder.subtotal == null) {
+    console.warn('=== [WEBHOOK] subtotal ausente no retorno de detalhes do iFood ===', {
+      eventId: event.id,
+      orderId: order.id,
+      totalFields: Object.keys(order.total || {})
+    });
+  }
 
   // NOTA: os nomes de campo abaixo (item.options, item.unitPrice) seguem o formato
   // documentado publicamente, mas vale conferir com um pedido de teste real no
@@ -445,6 +463,7 @@ async function handleConcluded(event) {
     return;
   }
 
+  await syncOrderSubtotal(order, event);
   await syncFinancialServiceFee(order, event);
 
   let statusUpdated = false;
@@ -520,6 +539,52 @@ async function syncFinancialServiceFeeForOrder(event) {
   if (error) throw error;
   if (!order) throw new Error(`Pedido ${event.orderId} não encontrado para sincronizar taxa de serviço`);
   await syncFinancialServiceFee(order, event);
+}
+
+async function syncOrderSubtotalForOrder(event) {
+  const { data: order, error } = await supabaseAdmin
+    .from('orders')
+    .select('id, ifood_order_id, subtotal')
+    .eq('ifood_order_id', event.orderId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!order) throw new Error(`Pedido ${event.orderId} não encontrado para sincronizar subtotal`);
+  await syncOrderSubtotal(order, event);
+}
+
+async function syncOrderSubtotal(order, event) {
+  if (order.subtotal != null) return;
+
+  const orderDetails = await getOrderDetails(order.ifood_order_id);
+  if (!orderDetails) {
+    console.warn('=== [WEBHOOK] detalhes indisponíveis para sincronizar subtotal ===', {
+      eventId: event.id,
+      orderId: order.ifood_order_id
+    });
+    return;
+  }
+  const subtotal = getIfoodMoneyValue(orderDetails.total?.subTotal);
+  if (subtotal == null) {
+    console.warn('=== [WEBHOOK] subtotal ausente no retorno de detalhes do iFood ===', {
+      eventId: event.id,
+      orderId: order.ifood_order_id,
+      totalFields: Object.keys(orderDetails.total || {})
+    });
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from('orders')
+    .update({ subtotal })
+    .eq('id', order.id)
+    .is('subtotal', null);
+  if (error) throw error;
+
+  console.log('=== [WEBHOOK] subtotal atualizado pelo iFood ===', {
+    eventId: event.id,
+    orderId: order.ifood_order_id,
+    subtotal
+  });
 }
 
 async function syncFinancialServiceFee(order, event) {
