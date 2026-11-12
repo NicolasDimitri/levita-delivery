@@ -346,6 +346,7 @@ async function handlePlaced(event) {
       payment_category: paymentCategory,
       payment_raw: payments,
       total_value: order.total?.orderAmount ?? 0,
+      subtotal: order.total?.subTotal ?? null,
       delivery_fee: order.total?.deliveryFee ?? 0,
       service_fee: serviceFee,
       benefits_raw: order.benefits ?? [],
