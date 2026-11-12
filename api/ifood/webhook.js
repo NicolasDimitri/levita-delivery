@@ -132,6 +132,9 @@ async function processEvent(event) {
   if (lookupError) throw lookupError;
   if (already) {
     console.log('=== [WEBHOOK] evento duplicado ignorado ===', { eventId: event.id, code: event.code });
+    if (['PLC', 'PLACED'].includes(String(event.code || '').toUpperCase())) {
+      await syncOrderSubtotalForOrder(event);
+    }
     return 'duplicate';
   }
 
@@ -288,6 +291,7 @@ async function handlePlaced(event) {
       orderId: event.orderId,
       localOrderId: existingOrder.id
     });
+    await syncOrderSubtotalForOrder(event);
     return;
   }
 
@@ -349,7 +353,7 @@ async function handlePlaced(event) {
       payment_category: paymentCategory,
       payment_raw: payments,
       total_value: order.total?.orderAmount ?? 0,
-      subtotal: order.total ?? null,
+      subtotal: order,
       delivery_fee: order.total?.deliveryFee ?? 0,
       service_fee: serviceFee,
       benefits_raw: order.benefits ?? [],
@@ -377,7 +381,9 @@ async function handlePlaced(event) {
     orderId: order.id,
     localOrderId: insertedOrder.id,
     displayId: order.displayId,
-    subtotal: insertedOrder.subtotal
+    hasSubtotalSnapshot: Boolean(insertedOrder.subtotal),
+    orderFields: Object.keys(order),
+    totalFields: Object.keys(order.total || {})
   });
   if (insertedOrder.subtotal == null) {
     console.warn('=== [WEBHOOK] subtotal ausente no retorno de detalhes do iFood ===', {
@@ -541,12 +547,23 @@ async function syncOrderSubtotalForOrder(event) {
     .eq('ifood_order_id', event.orderId)
     .maybeSingle();
   if (error) throw error;
-  if (!order) throw new Error(`Pedido ${event.orderId} não encontrado para sincronizar subtotal`);
+  if (!order) {
+    console.warn('=== [WEBHOOK] pedido não encontrado para sincronizar subtotal ===', {
+      eventId: event.id,
+      orderId: event.orderId
+    });
+    return;
+  }
   await syncOrderSubtotal(order, event);
 }
 
 async function syncOrderSubtotal(order, event) {
-  if (order.subtotal && typeof order.subtotal === 'object' && !Array.isArray(order.subtotal)) return;
+  if (
+    order.subtotal &&
+    typeof order.subtotal === 'object' &&
+    !Array.isArray(order.subtotal) &&
+    Object.prototype.hasOwnProperty.call(order.subtotal, 'total')
+  ) return;
 
   const orderDetails = await getOrderDetails(order.ifood_order_id);
   if (!orderDetails) {
@@ -556,26 +573,17 @@ async function syncOrderSubtotal(order, event) {
     });
     return;
   }
-  const subtotal = orderDetails.total;
-  if (!subtotal || typeof subtotal !== 'object' || Array.isArray(subtotal)) {
-    console.warn('=== [WEBHOOK] subtotal ausente no retorno de detalhes do iFood ===', {
-      eventId: event.id,
-      orderId: order.ifood_order_id,
-      totalFields: Object.keys(orderDetails.total || {})
-    });
-    return;
-  }
-
   const { error } = await supabaseAdmin
     .from('orders')
-    .update({ subtotal })
+    .update({ subtotal: orderDetails })
     .eq('id', order.id)
   if (error) throw error;
 
   console.log('=== [WEBHOOK] subtotal atualizado pelo iFood ===', {
     eventId: event.id,
     orderId: order.ifood_order_id,
-    subtotal
+    orderFields: Object.keys(orderDetails),
+    totalFields: Object.keys(orderDetails.total || {})
   });
 }
 

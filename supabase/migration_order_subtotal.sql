@@ -1,4 +1,4 @@
--- Store the complete iFood order.total object in this column for inspection.
+-- Store the complete iFood order details response in this column for inspection.
 alter table public.orders
   add column if not exists subtotal jsonb;
 
