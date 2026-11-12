@@ -271,6 +271,26 @@ async function handleReadyToPickup(event) {
   await updateOrderStatusFromEvent(event, 'pronto', ['em_preparo']);
 }
 
+function getServiceFee(order) {
+  const additionalFees = Array.isArray(order.additionalFees) ? order.additionalFees : [];
+  const serviceFees = additionalFees.filter(
+    (fee) => typeof fee?.type === 'string' && fee.type.toUpperCase() === 'SERVICE_FEE'
+  );
+
+  if (serviceFees.length > 0) {
+    return serviceFees.reduce((total, fee) => {
+      const value = typeof fee.value === 'object' && fee.value !== null
+        ? fee.value.value
+        : fee.value;
+      const amount = Number(value);
+      return total + (Number.isFinite(amount) ? amount : 0);
+    }, 0);
+  }
+
+  const totalServiceFee = Number(order.total?.serviceFee);
+  return Number.isFinite(totalServiceFee) ? totalServiceFee : null;
+}
+
 async function handlePlaced(event) {
   const { data: existingOrder, error: existingOrderError } = await supabaseAdmin
     .from('orders')
@@ -300,6 +320,7 @@ async function handlePlaced(event) {
 
   const payments = order.payment || order.payments;
   const paymentCategory = classifyPayment(payments);
+  const serviceFee = getServiceFee(order);
 
   const customer = order.customer || {};
   const delivery = order.delivery || {};
@@ -338,6 +359,7 @@ async function handlePlaced(event) {
       payment_raw: payments,
       total_value: order.total?.orderAmount ?? 0,
       delivery_fee: order.total?.deliveryFee ?? 0,
+      service_fee: serviceFee,
       benefits_raw: order.benefits ?? [],
       benefits_value: order.total?.benefits ?? 0,
       delivery_date_time: delivery.deliveryDateTime || null,

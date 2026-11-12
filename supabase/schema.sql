@@ -109,6 +109,7 @@ create table public.orders (
   payment_raw jsonb,
   total_value numeric(10,2) not null default 0,
   delivery_fee numeric(10,2) not null default 0,
+  service_fee numeric(10,2),
   benefits_raw jsonb not null default '[]'::jsonb,
   benefits_value numeric(10,2) not null default 0,
 
