@@ -24,13 +24,6 @@ function readRawBody(req) {
   });
 }
 
-function getIfoodMoneyValue(value) {
-  const rawValue = typeof value === 'object' && value !== null ? value.value : value;
-  if (rawValue == null || rawValue === '') return null;
-  const amount = Number(rawValue);
-  return Number.isFinite(amount) ? amount : null;
-}
-
 function isValidSignature(rawBody, signatureHeader) {
   if (!signatureHeader) return false;
 
@@ -356,7 +349,7 @@ async function handlePlaced(event) {
       payment_category: paymentCategory,
       payment_raw: payments,
       total_value: order.total?.orderAmount ?? 0,
-      subtotal: getIfoodMoneyValue(order.total?.subTotal),
+      subtotal: order.total ?? null,
       delivery_fee: order.total?.deliveryFee ?? 0,
       service_fee: serviceFee,
       benefits_raw: order.benefits ?? [],
@@ -553,7 +546,7 @@ async function syncOrderSubtotalForOrder(event) {
 }
 
 async function syncOrderSubtotal(order, event) {
-  if (order.subtotal != null) return;
+  if (order.subtotal && typeof order.subtotal === 'object' && !Array.isArray(order.subtotal)) return;
 
   const orderDetails = await getOrderDetails(order.ifood_order_id);
   if (!orderDetails) {
@@ -563,8 +556,8 @@ async function syncOrderSubtotal(order, event) {
     });
     return;
   }
-  const subtotal = getIfoodMoneyValue(orderDetails.total?.subTotal);
-  if (subtotal == null) {
+  const subtotal = orderDetails.total;
+  if (!subtotal || typeof subtotal !== 'object' || Array.isArray(subtotal)) {
     console.warn('=== [WEBHOOK] subtotal ausente no retorno de detalhes do iFood ===', {
       eventId: event.id,
       orderId: order.ifood_order_id,
@@ -577,7 +570,6 @@ async function syncOrderSubtotal(order, event) {
     .from('orders')
     .update({ subtotal })
     .eq('id', order.id)
-    .is('subtotal', null);
   if (error) throw error;
 
   console.log('=== [WEBHOOK] subtotal atualizado pelo iFood ===', {

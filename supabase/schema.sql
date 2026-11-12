@@ -108,7 +108,7 @@ create table public.orders (
   payment_category text not null check (payment_category in ('online', 'dinheiro', 'debito', 'credito')),
   payment_raw jsonb,
   total_value numeric(10,2) not null default 0,
-  subtotal numeric(10,2),
+  subtotal jsonb,
   delivery_fee numeric(10,2) not null default 0,
   service_fee numeric(10,2),
   benefits_raw jsonb not null default '[]'::jsonb,
