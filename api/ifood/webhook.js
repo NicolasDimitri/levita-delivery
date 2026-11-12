@@ -7,7 +7,7 @@
 
 import crypto from 'crypto';
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-import { getOrderDetails, classifyPayment } from '../../lib/ifood.js';
+import { getOrderDetails, getFinancialServiceFee, classifyPayment } from '../../lib/ifood.js';
 import { getDeliveryCoordinates } from '../../lib/deliveryAddress.js';
 import { DRIVER_EARNING_PER_DELIVERY } from '../../lib/driverEarnings.js';
 
@@ -265,30 +265,11 @@ async function handleDispatched(event) {
     ifood_dispatched_at: new Date().toISOString(),
     ifood_dispatching_at: null
   });
+  await syncFinancialServiceFeeForOrder(event);
 }
 
 async function handleReadyToPickup(event) {
   await updateOrderStatusFromEvent(event, 'pronto', ['em_preparo']);
-}
-
-function getServiceFee(order) {
-  const additionalFees = Array.isArray(order.additionalFees) ? order.additionalFees : [];
-  const serviceFees = additionalFees.filter(
-    (fee) => typeof fee?.type === 'string' && fee.type.toUpperCase() === 'SERVICE_FEE'
-  );
-
-  if (serviceFees.length > 0) {
-    return serviceFees.reduce((total, fee) => {
-      const value = typeof fee.value === 'object' && fee.value !== null
-        ? fee.value.value
-        : fee.value;
-      const amount = Number(value);
-      return total + (Number.isFinite(amount) ? amount : 0);
-    }, 0);
-  }
-
-  const totalServiceFee = Number(order.total?.serviceFee);
-  return Number.isFinite(totalServiceFee) ? totalServiceFee : null;
 }
 
 async function handlePlaced(event) {
@@ -320,7 +301,14 @@ async function handlePlaced(event) {
 
   const payments = order.payment || order.payments;
   const paymentCategory = classifyPayment(payments);
-  const serviceFee = getServiceFee(order);
+  const serviceFee = await tryGetFinancialServiceFee({
+    event,
+    merchantId: order.merchant?.id,
+    orderId: order.id,
+    displayId: order.displayId,
+    createdAt: order.createdAt || event.createdAt,
+    timeoutMs: 1_500
+  });
 
   const customer = order.customer || {};
   const delivery = order.delivery || {};
@@ -442,7 +430,7 @@ async function handlePlaced(event) {
 async function handleConcluded(event) {
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .select('id, status, driver_id')
+    .select('id, status, driver_id, ifood_order_id, merchant_id, display_id, created_at, service_fee')
     .eq('ifood_order_id', event.orderId)
     .maybeSingle();
   if (orderError) throw orderError;
@@ -455,6 +443,8 @@ async function handleConcluded(event) {
     });
     return;
   }
+
+  await syncFinancialServiceFee(order, event);
 
   let statusUpdated = false;
   if (order.status !== 'entregue') {
@@ -517,6 +507,88 @@ async function handleConcluded(event) {
         localOrderId: order.id
       });
     }
+  }
+}
+
+async function syncFinancialServiceFeeForOrder(event) {
+  const { data: order, error } = await supabaseAdmin
+    .from('orders')
+    .select('id, ifood_order_id, merchant_id, display_id, created_at, service_fee')
+    .eq('ifood_order_id', event.orderId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!order) throw new Error(`Pedido ${event.orderId} não encontrado para sincronizar taxa de serviço`);
+  await syncFinancialServiceFee(order, event);
+}
+
+async function syncFinancialServiceFee(order, event) {
+  if (order.service_fee != null) return;
+
+  const serviceFee = await tryGetFinancialServiceFee({
+    event,
+    merchantId: order.merchant_id,
+    orderId: order.ifood_order_id,
+    displayId: order.display_id,
+    createdAt: order.created_at
+  });
+  if (serviceFee == null) return;
+
+  const { error } = await supabaseAdmin
+    .from('orders')
+    .update({ service_fee: serviceFee })
+    .eq('id', order.id)
+    .is('service_fee', null);
+  if (error) throw error;
+
+  console.log('=== [WEBHOOK] taxa de serviço financeira salva ===', {
+    eventId: event.id,
+    orderId: order.ifood_order_id,
+    serviceFee
+  });
+}
+
+async function tryGetFinancialServiceFee({
+  event,
+  merchantId,
+  orderId,
+  displayId,
+  createdAt,
+  timeoutMs = 2_500
+}) {
+  if (!merchantId || !createdAt || Number.isNaN(new Date(createdAt).getTime())) {
+    console.warn('=== [WEBHOOK] dados insuficientes para consultar taxa financeira do iFood ===', {
+      eventId: event.id,
+      orderId,
+      hasMerchantId: Boolean(merchantId),
+      hasValidCreatedAt: Boolean(createdAt && !Number.isNaN(new Date(createdAt).getTime()))
+    });
+    return null;
+  }
+
+  try {
+    const serviceFee = await getFinancialServiceFee(
+      merchantId,
+      orderId,
+      displayId,
+      createdAt,
+      timeoutMs
+    );
+    if (serviceFee == null) {
+      console.warn('=== [WEBHOOK] taxa de serviço ainda indisponível na Financial API ===', {
+        eventId: event.id,
+        orderId,
+        merchantId
+      });
+    }
+    return serviceFee;
+  } catch (error) {
+    console.warn('=== [WEBHOOK] falha ao consultar taxa de serviço na Financial API ===', {
+      eventId: event.id,
+      orderId,
+      merchantId,
+      error: error.message
+    });
+    return null;
   }
 }
 
