@@ -12,8 +12,10 @@ import ExpenseForm from '../components/ExpenseForm';
 import ExpenseCard from '../components/ExpenseCard';
 import PaymentForm from '../components/PaymentForm';
 import PaymentCard from '../components/PaymentCard';
+import OrderSettlement from '../components/OrderSettlement';
 
 const TABS = [
+  { id: 'repasses',   label: 'Repasses'   },
   { id: 'gastos',     label: 'Gastos'     },
   { id: 'pagamentos', label: 'Pagamentos' },
   { id: 'cartoes',    label: 'Cartões'    },
@@ -133,6 +135,8 @@ export default function ExpensesPage() {
       </div>
 
       <div className="mx-auto max-w-2xl px-4 pt-5">
+
+        {tab === 'repasses' && <OrderSettlement />}
 
         {/* ── gastos ── */}
         {tab === 'gastos' && (
