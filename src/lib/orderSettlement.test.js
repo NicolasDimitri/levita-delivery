@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { calculateOrderSettlement, weekFor } from './orderSettlement.js';
 
 const order = (pending = 0, benefits = [], totalBenefits = 0) => ({
-  order_total: { subTotal: 21, deliveryFee: 5, serviceFees: [{ description: 'Taxa de Serviço', value: 1 }], benefits: totalBenefits },
+  order_total: { subTotal: 21, deliveryFee: 5, additionalFees: 1, benefits: totalBenefits },
   payment_pending: pending,
   benefits_raw: benefits
 });
@@ -12,12 +12,24 @@ const benefit = (merchant, ifood) => ({
   sponsorshipValues: [{ name: 'MERCHANT', value: merchant }, { name: 'IFOOD', value: ifood }]
 });
 
-test('comissão inclui taxa de serviço, mas o repasse não trata a taxa como receita da loja', () => {
+test('comissão inclui taxas adicionais, mas o repasse não as trata como receita da loja', () => {
   const result = calculateOrderSettlement(order());
   assert.equal(result.gross, 2600);
   assert.equal(result.commission, 324);
   assert.equal(result.net, 2276);
   assert.equal(result.payout, 2276);
+});
+
+test('comissão inclui taxas de serviço e conveniência no total antes dos incentivos', () => {
+  const result = calculateOrderSettlement({
+    order_total: { subTotal: 39.90, deliveryFee: 0, additionalFees: 5.94, benefits: 10 },
+    payment_pending: 0,
+    benefits_raw: [benefit(5, 5)]
+  });
+  assert.equal(result.gross, 3990);
+  assert.equal(result.commission, 550);
+  assert.equal(result.net, 2940);
+  assert.equal(result.payout, 2940);
 });
 
 test('pagamento direto pode deixar saldo negativo ou positivo com incentivo iFood', () => {
@@ -40,8 +52,10 @@ test('não estima pedidos com campos incompletos ou descontos inconsistentes', (
   assert.ok(calculateOrderSettlement({ ...order(), order_total: { subTotal: 21, deliveryFee: 5 } }).error);
   assert.ok(calculateOrderSettlement({
     ...order(),
-    order_total: { ...order().order_total, serviceFees: [{ value: 'inválido' }] }
+    order_total: { ...order().order_total, additionalFees: 'inválido' }
   }).error);
+  const { additionalFees, ...withoutAdditionalFees } = order().order_total;
+  assert.ok(calculateOrderSettlement({ ...order(), order_total: withoutAdditionalFees }).error);
   assert.ok(calculateOrderSettlement(order(0, [], 5)).error);
   assert.ok(calculateOrderSettlement(order(0, [benefit(2, 3)], 4)).error);
   assert.ok(calculateOrderSettlement(order(0, [{
@@ -49,9 +63,9 @@ test('não estima pedidos com campos incompletos ou descontos inconsistentes', (
   }], 1)).error);
 });
 
-test('pedido sem taxa de serviço tem comissão calculada apenas sobre itens e entrega', () => {
-  const noServiceFee = { ...order(), order_total: { ...order().order_total, serviceFees: [] } };
-  assert.equal(calculateOrderSettlement(noServiceFee).commission, 312);
+test('pedido sem taxas adicionais tem comissão calculada apenas sobre itens e entrega', () => {
+  const noAdditionalFees = { ...order(), order_total: { ...order().order_total, additionalFees: 0 } };
+  assert.equal(calculateOrderSettlement(noAdditionalFees).commission, 312);
 });
 
 test('semana é de segunda a domingo, com repasse na quarta seguinte', () => {

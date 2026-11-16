@@ -129,8 +129,8 @@ export default function OrderSettlement() {
         <Button type="button" variant="secondary" onClick={load} disabled={loading}>Atualizar</Button>
       </div>
       <p className="text-xs text-gray-500">
-        Estimativa para pedidos concluídos, não é o extrato oficial do iFood. Comissão de 12% sobre itens, entrega e taxa
-        de serviço, menos incentivo da loja. A taxa de serviço entra na base da comissão, mas não no valor da loja.
+        Estimativa para pedidos concluídos, não é o extrato oficial do iFood. Comissão de 12% sobre itens, entrega e taxas
+        adicionais, menos incentivo da loja. As taxas adicionais entram na base da comissão, mas não no valor da loja.
         O valor previsto na entrega é abatido do repasse. Confira outras taxas e a comissão real no demonstrativo.
       </p>
       {error && <ErrorMsg message={`Erro ao carregar repasses: ${error}`} />}
