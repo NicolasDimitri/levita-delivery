@@ -11,13 +11,28 @@ function cents(value) {
   return Math.round(number * 100);
 }
 
+function serviceFeeCents(fees) {
+  if (!Array.isArray(fees)) return null;
+  let total = 0;
+  for (const fee of fees) {
+    const rawValue = typeof fee?.value === 'object' && fee.value !== null
+      ? fee.value.value
+      : fee?.value;
+    const amount = cents(rawValue);
+    if (amount === null) return null;
+    total += amount;
+  }
+  return total;
+}
+
 export function calculateOrderSettlement(order) {
   const total = order.order_total;
   const subtotal = cents(total?.subTotal);
   const delivery = cents(total?.deliveryFee);
+  const serviceFee = serviceFeeCents(total?.serviceFees);
   const discount = cents(total?.benefits);
   const pending = cents(order.payment_pending);
-  if (subtotal === null || delivery === null || discount === null || pending === null) {
+  if (subtotal === null || delivery === null || serviceFee === null || discount === null || pending === null) {
     return { error: 'Dados financeiros incompletos' };
   }
   if (!Array.isArray(order.benefits_raw)) return { error: 'Detalhes dos descontos indisponíveis' };
@@ -45,7 +60,7 @@ export function calculateOrderSettlement(order) {
   if (benefitsSum !== discount) return { error: 'Total dos descontos não confere' };
 
   const gross = subtotal + delivery;
-  const commission = Math.round(gross * 12 / 100);
+  const commission = Math.round((gross + serviceFee) * 12 / 100);
   const net = gross - merchant - commission;
   return { gross, commission, merchant, ifood, pending, net, payout: net - pending };
 }

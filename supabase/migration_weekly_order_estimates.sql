@@ -27,7 +27,21 @@ begin
     (coalesce((o.subtotal ->> 'createdAt')::timestamptz, o.created_at)
       at time zone 'America/Sao_Paulo')::date,
     o.subtotal ->> 'createdAt' is null,
-    o.subtotal -> 'total', o.payment_raw -> 'pending', o.benefits_raw
+    case
+      when jsonb_typeof(o.subtotal -> 'additionalFees') = 'array' then
+        jsonb_set(
+          o.subtotal -> 'total',
+          '{serviceFees}',
+          coalesce((
+            select jsonb_agg(fee)
+            from jsonb_array_elements(o.subtotal -> 'additionalFees') as fees(fee)
+            where lower(btrim(fee ->> 'description')) = 'taxa de serviço'
+          ), '[]'::jsonb),
+          true
+        )
+      else jsonb_set(o.subtotal -> 'total', '{serviceFees}', 'null'::jsonb, true)
+    end,
+    o.payment_raw -> 'pending', o.benefits_raw
   from public.orders o
   where o.status = 'entregue'
     and (coalesce((o.subtotal ->> 'createdAt')::timestamptz, o.created_at)
