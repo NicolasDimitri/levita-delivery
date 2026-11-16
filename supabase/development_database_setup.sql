@@ -85,7 +85,6 @@ create table public.orders (
   total_value numeric(10,2) not null default 0,
   subtotal jsonb,
   delivery_fee numeric(10,2) not null default 0,
-  service_fee numeric(10,2),
   benefits_raw jsonb not null default '[]'::jsonb,
   benefits_value numeric(10,2) not null default 0,
   status text not null default 'recebido'
