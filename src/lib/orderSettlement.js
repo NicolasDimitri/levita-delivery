@@ -61,6 +61,20 @@ export function calculateOrderSettlement(order) {
   return { gross, commission, onlineFee, merchant, ifood, pending, net, payout: net - pending };
 }
 
+export function settlementEntry(order) {
+  const calculation = calculateOrderSettlement(order);
+  const reason = order.date_estimated ? 'Data original não disponível'
+    : !STORES.some(store => store.id === order.merchant_id) ? 'Loja não identificada'
+      : calculation.error;
+  return { order, calculation, reason };
+}
+
+export function dailyStoreEntries(orders, date, storeId) {
+  return orders
+    .filter(order => order.order_date === date && order.merchant_id === storeId)
+    .map(settlementEntry);
+}
+
 export function weekFor(date) {
   const selected = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(selected.getTime())) throw new Error('Data inválida');

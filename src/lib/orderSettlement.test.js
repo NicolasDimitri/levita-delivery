@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateOrderSettlement, weekFor } from './orderSettlement.js';
+import { calculateOrderSettlement, dailyStoreEntries, STORES, weekFor } from './orderSettlement.js';
 
 const benefit = (merchant, ifood) => ({
   value: merchant + ifood,
@@ -97,6 +97,24 @@ test('não estima pedidos com campos incompletos, valores inconsistentes ou paga
   assert.ok(calculateOrderSettlement(order(0, [{
     value: 1, sponsorshipValues: [{ name: 'EXTERNAL', value: 1 }]
   }], 1)).error);
+});
+
+test('detalhamento contém apenas pedidos da loja e dia selecionados, sinalizando excluídos', () => {
+  const [store, otherStore] = STORES;
+  const base = { ...order(), merchant_id: store.id, order_date: '2026-11-16', date_estimated: false };
+  const entries = dailyStoreEntries([
+    { ...base, id: 'incluido' },
+    { ...base, id: 'incompleto', payment_pending: null },
+    { ...base, id: 'data-estimada', date_estimated: true },
+    { ...base, id: 'outra-loja', merchant_id: otherStore.id },
+    { ...base, id: 'outro-dia', order_date: '2026-11-17' }
+  ], '2026-11-16', store.id);
+  assert.deepEqual(entries.map(entry => entry.order.id), ['incluido', 'incompleto', 'data-estimada']);
+  assert.equal(entries[0].reason, undefined);
+  assert.equal(entries[0].calculation.net, 2205);
+  assert.equal(entries[1].reason, 'Dados financeiros incompletos');
+  assert.equal(entries[2].reason, 'Data original não disponível');
+  assert.deepEqual(dailyStoreEntries([base], '2026-11-16', otherStore.id), []);
 });
 
 test('semana é de segunda a domingo, com repasse na quarta seguinte', () => {
