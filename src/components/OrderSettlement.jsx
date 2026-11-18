@@ -165,11 +165,6 @@ export default function OrderSettlement() {
         </label>
         <Button type="button" variant="secondary" onClick={load} disabled={loading}>Atualizar</Button>
       </div>
-      <p className="text-xs text-gray-500">
-        Estimativa para pedidos concluídos, não é o extrato oficial do iFood. As taxas de 12% e, no pagamento online,
-        3,2% são calculadas sobre itens e entrega, menos incentivo da loja. O valor previsto na entrega é abatido
-        do repasse. Ajustes, como reembolso da taxa de serviço, não estão incluídos; confira o demonstrativo.
-      </p>
       {error && <ErrorMsg message={`Erro ao carregar repasses: ${error}`} />}
       {liveError && <p className="text-xs text-amber-700">Atualização automática indisponível. Use o botão Atualizar.</p>}
       {loading && <p className="text-sm text-gray-500">Carregando pedidos...</p>}
@@ -193,10 +188,6 @@ export default function OrderSettlement() {
             ))}
           </div>
           <h2 className="font-semibold text-gray-800">Repasse estimado da semana</h2>
-          <p className="text-xs text-gray-500">
-            Pedidos de {shortDate(week.start)} a {shortDate(week.last)} · previsão: quarta-feira, {shortDate(week.payout)}.
-            Valor negativo indica desconto no repasse.
-          </p>
           <SummaryCard label="Total das três lojas" summary={weekly} />
           <div className="grid gap-2 sm:grid-cols-3">
             {STORES.map(store => (
