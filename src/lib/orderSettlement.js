@@ -17,8 +17,10 @@ export function calculateOrderSettlement(order) {
   const delivery = cents(total?.deliveryFee);
   const additionalFees = cents(total?.additionalFees);
   const discount = cents(total?.benefits);
+  const orderAmount = cents(total?.orderAmount);
   const pending = cents(order.payment_pending);
-  if (subtotal === null || delivery === null || additionalFees === null || discount === null || pending === null) {
+  if (subtotal === null || delivery === null || additionalFees === null || discount === null ||
+      orderAmount === null || pending === null) {
     return { error: 'Dados financeiros incompletos' };
   }
   if (!Array.isArray(order.benefits_raw)) return { error: 'Detalhes dos descontos indisponíveis' };
@@ -46,9 +48,17 @@ export function calculateOrderSettlement(order) {
   if (benefitsSum !== discount) return { error: 'Total dos descontos não confere' };
 
   const gross = subtotal + delivery;
-  const commission = Math.round((gross + additionalFees) * 12 / 100);
-  const net = gross - merchant - commission;
-  return { gross, commission, merchant, ifood, pending, net, payout: net - pending };
+  if (gross + additionalFees - discount !== orderAmount) return { error: 'Total do pedido não confere' };
+  if (merchant > gross) return { error: 'Incentivo da loja excede o valor da venda' };
+  if (orderAmount === 0 || (pending !== 0 && pending !== orderAmount)) {
+    return { error: 'Pagamento requer conferência' };
+  }
+
+  const saleBase = gross - merchant;
+  const commission = Math.round(saleBase * 12 / 100);
+  const onlineFee = pending === 0 ? Math.round(saleBase * 32 / 1000) : 0;
+  const net = saleBase - commission - onlineFee;
+  return { gross, commission, onlineFee, merchant, ifood, pending, net, payout: net - pending };
 }
 
 export function weekFor(date) {

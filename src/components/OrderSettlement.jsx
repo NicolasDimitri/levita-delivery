@@ -129,9 +129,9 @@ export default function OrderSettlement() {
         <Button type="button" variant="secondary" onClick={load} disabled={loading}>Atualizar</Button>
       </div>
       <p className="text-xs text-gray-500">
-        Estimativa para pedidos concluídos, não é o extrato oficial do iFood. Comissão de 12% sobre itens, entrega e taxas
-        adicionais, menos incentivo da loja. As taxas adicionais entram na base da comissão, mas não no valor da loja.
-        O valor previsto na entrega é abatido do repasse. Confira outras taxas e a comissão real no demonstrativo.
+        Estimativa para pedidos concluídos, não é o extrato oficial do iFood. As taxas de 12% e, no pagamento online,
+        3,2% são calculadas sobre itens e entrega, menos incentivo da loja. O valor previsto na entrega é abatido
+        do repasse. Ajustes, como reembolso da taxa de serviço, não estão incluídos; confira o demonstrativo.
       </p>
       {error && <ErrorMsg message={`Erro ao carregar repasses: ${error}`} />}
       {liveError && <p className="text-xs text-amber-700">Atualização automática indisponível. Use o botão Atualizar.</p>}
