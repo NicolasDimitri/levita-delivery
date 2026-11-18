@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateOrderSettlement, dailyStoreEntries, STORES, summarizeSettlement, weekFor } from './orderSettlement.js';
+import { calculateOrderSettlement, dailyStoreEntries, STORES, summarizeSettlement, weekFor, weeklySettlementHistory } from './orderSettlement.js';
 
 const benefit = (merchant, ifood) => ({
   value: merchant + ifood,
@@ -136,4 +136,29 @@ test('semana é de segunda a domingo, com repasse na quarta seguinte', () => {
   });
   assert.equal(weekFor('2027-01-03').start, '2026-12-28');
   assert.equal(weekFor('2027-01-04').start, '2027-01-04');
+});
+
+test('histórico agrupa semanas e lojas, somando repasses e sinalizando pedidos excluídos', () => {
+  const [first, second] = STORES;
+  const base = { ...order(), merchant_id: first.id, date_estimated: false };
+  const delivery = {
+    ...order(26.89, [benefit(8, 0)], 8),
+    order_total: { subTotal: 33.90, deliveryFee: 0, additionalFees: 0.99, benefits: 8, orderAmount: 26.89 },
+    merchant_id: second.id, date_estimated: false, order_date: '2027-01-03'
+  };
+  const weeks = weeklySettlementHistory([
+    { ...base, order_date: '2026-12-28' },
+    delivery,
+    { ...base, order_date: '2026-12-31', payment_pending: null },
+    { ...base, order_date: '2026-12-29', merchant_id: 'unknown' },
+    { ...base, order_date: '2027-01-04' }
+  ]);
+  assert.deepEqual(weeks.map(item => item.week.start), ['2027-01-04', '2026-12-28']);
+  assert.deepEqual(weeks[1].summary, { payout: 1795, count: 2, excluded: 2 });
+  assert.equal(weeks[1].stores[0].summary.payout, 2205);
+  assert.equal(weeks[1].stores[0].summary.excluded, 1);
+  assert.equal(weeks[1].stores[1].summary.payout, -410);
+  assert.equal(weeks[1].stores[2].summary.payout, 0);
+  assert.equal(weeks.reduce((sum, item) => sum + item.summary.payout, 0), 4000);
+  assert.deepEqual(weeklySettlementHistory([]), []);
 });

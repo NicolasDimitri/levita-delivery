@@ -88,6 +88,25 @@ export function summarizeSettlement(orders) {
   return result;
 }
 
+export function weeklySettlementHistory(orders) {
+  const grouped = new Map();
+  for (const order of orders) {
+    const week = weekFor(order.order_date);
+    if (!grouped.has(week.start)) grouped.set(week.start, { week, orders: [] });
+    grouped.get(week.start).orders.push(order);
+  }
+  return [...grouped.values()]
+    .sort((a, b) => b.week.start.localeCompare(a.week.start))
+    .map(({ week, orders: weekOrders }) => ({
+      week,
+      summary: summarizeSettlement(weekOrders),
+      stores: STORES.map(store => ({
+        ...store,
+        summary: summarizeSettlement(weekOrders.filter(order => order.merchant_id === store.id))
+      }))
+    }));
+}
+
 export function weekFor(date) {
   const selected = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(selected.getTime())) throw new Error('Data inválida');
