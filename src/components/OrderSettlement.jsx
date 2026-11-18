@@ -2,32 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { Card, Button, ErrorMsg } from '../lib/ui';
 import { fmtBRL } from '../lib/constants';
-import { STORES, dailyStoreEntries, settlementEntry, todayInBrazil, weekFor } from '../lib/orderSettlement';
+import { STORES, dailyStoreEntries, settlementEntry, summarizeSettlement, todayInBrazil, weekFor } from '../lib/orderSettlement';
 
 const PAGE_SIZE = 500;
 const money = cents => `R$ ${fmtBRL(cents / 100)}`;
 const shortDate = date => date.split('-').reverse().join('/');
 
-function summarize(orders) {
-  const result = { net: 0, payout: 0, count: 0, excluded: 0 };
-  for (const order of orders) {
-    const { calculation, reason } = settlementEntry(order);
-    if (reason) {
-      result.excluded++;
-    } else {
-      result.net += calculation.net;
-      result.payout += calculation.payout;
-      result.count++;
-    }
-  }
-  return result;
-}
-
-function SummaryCard({ label, summary, field, onClick }) {
+function SummaryCard({ label, summary, onClick }) {
   const content = (
     <Card>
       <p className="text-xs text-gray-500">{label}</p>
-      <p className="mt-1 text-lg font-bold text-gray-800">{money(summary[field])}</p>
+      <p className="mt-1 text-lg font-bold text-gray-800">{money(summary.payout)}</p>
       <p className="mt-1 text-xs text-gray-500">
         {summary.count} calculado(s){summary.excluded > 0 && ` · ${summary.excluded} não calculado(s)`}
       </p>
@@ -116,8 +101,8 @@ export default function OrderSettlement() {
   }, [load, week.start]);
 
   const dailyOrders = orders.filter(order => order.order_date === date);
-  const daily = summarize(dailyOrders);
-  const weekly = summarize(orders);
+  const daily = summarizeSettlement(dailyOrders);
+  const weekly = summarizeSettlement(orders);
   const reasons = {};
   for (const order of orders) {
     const { reason } = settlementEntry(order);
@@ -126,7 +111,7 @@ export default function OrderSettlement() {
 
   if (selectedStore) {
     const entries = dailyStoreEntries(orders, date, selectedStore.id);
-    const summary = summarize(entries.map(entry => entry.order));
+    const summary = summarizeSettlement(entries.map(entry => entry.order));
     return (
       <div className="space-y-4">
         <Button type="button" variant="secondary" onClick={() => setSelectedStore(null)}>← Voltar</Button>
@@ -139,16 +124,16 @@ export default function OrderSettlement() {
         {loading && <p className="text-sm text-gray-500">Carregando pedidos...</p>}
         {!loading && !error && (
           <>
-            <SummaryCard label="Total líquido estimado" summary={summary} field="net" />
+            <SummaryCard label="Repasse estimado" summary={summary} />
             <p className="text-xs text-gray-500">
-              Valores estimados antes de descontar o pagamento recebido na entrega. Ajustes do iFood não estão incluídos.
+              O valor previsto para pagamento na entrega é abatido do repasse. Ajustes do iFood não estão incluídos.
             </p>
             {entries.length === 0 && <p className="text-sm text-gray-500">Nenhum pedido concluído para esta loja neste dia.</p>}
             {entries.map(({ order, calculation, reason }) => (
               <Card key={order.id}>
                 <div className="flex items-start justify-between gap-3">
                   <p className="font-semibold text-gray-800">Pedido {order.display_id ? `#${order.display_id}` : order.id}</p>
-                  {!reason && <p className="font-bold text-gray-800">{money(calculation.net)}</p>}
+                  {!reason && <p className="font-bold text-gray-800">{money(calculation.payout)}</p>}
                 </div>
                 {reason ? (
                   <p className="mt-2 text-sm text-amber-700">Não calculado: {reason}</p>
@@ -158,6 +143,7 @@ export default function OrderSettlement() {
                     <p>Incentivo da loja: − {money(calculation.merchant)}</p>
                     <p>Comissão iFood: − {money(calculation.commission)}</p>
                     <p>Taxa de pagamento online: − {money(calculation.onlineFee)}</p>
+                    {calculation.pending > 0 && <p>Pagamento previsto na entrega: − {money(calculation.pending)}</p>}
                   </div>
                 )}
               </Card>
@@ -198,11 +184,11 @@ export default function OrderSettlement() {
             </div>
           )}
           <h2 className="font-semibold text-gray-800">Dia {shortDate(date)}</h2>
-          <SummaryCard label="Total líquido das três lojas" summary={daily} field="net" />
+          <SummaryCard label="Repasse estimado das três lojas" summary={daily} />
           <div className="grid gap-2 sm:grid-cols-3">
             {STORES.map(store => (
               <SummaryCard key={store.id} label={store.name}
-                summary={summarize(dailyOrders.filter(order => order.merchant_id === store.id))} field="net"
+                summary={summarizeSettlement(dailyOrders.filter(order => order.merchant_id === store.id))}
                 onClick={() => setSelectedStore(store)} />
             ))}
           </div>
@@ -211,11 +197,11 @@ export default function OrderSettlement() {
             Pedidos de {shortDate(week.start)} a {shortDate(week.last)} · previsão: quarta-feira, {shortDate(week.payout)}.
             Valor negativo indica desconto no repasse.
           </p>
-          <SummaryCard label="Total das três lojas" summary={weekly} field="payout" />
+          <SummaryCard label="Total das três lojas" summary={weekly} />
           <div className="grid gap-2 sm:grid-cols-3">
             {STORES.map(store => (
               <SummaryCard key={store.id} label={store.name}
-                summary={summarize(orders.filter(order => order.merchant_id === store.id))} field="payout" />
+                summary={summarizeSettlement(orders.filter(order => order.merchant_id === store.id))} />
             ))}
           </div>
         </>

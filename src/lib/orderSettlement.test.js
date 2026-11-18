@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateOrderSettlement, dailyStoreEntries, STORES, weekFor } from './orderSettlement.js';
+import { calculateOrderSettlement, dailyStoreEntries, STORES, summarizeSettlement, weekFor } from './orderSettlement.js';
 
 const benefit = (merchant, ifood) => ({
   value: merchant + ifood,
@@ -115,6 +115,19 @@ test('detalhamento contém apenas pedidos da loja e dia selecionados, sinalizand
   assert.equal(entries[1].reason, 'Dados financeiros incompletos');
   assert.equal(entries[2].reason, 'Data original não disponível');
   assert.deepEqual(dailyStoreEntries([base], '2026-11-16', otherStore.id), []);
+});
+
+test('resumo diário soma repasses online e na entrega, não o líquido antes do pagamento', () => {
+  const deliveryOrder = {
+    ...order(26.89, [benefit(8, 0)], 8),
+    order_total: { subTotal: 33.90, deliveryFee: 0, additionalFees: 0.99, benefits: 8, orderAmount: 26.89 },
+    merchant_id: STORES[0].id
+  };
+  const onlineOrder = { ...order(), merchant_id: STORES[0].id };
+  assert.equal(calculateOrderSettlement(deliveryOrder).payout, -410);
+  assert.deepEqual(summarizeSettlement([deliveryOrder, onlineOrder, { ...onlineOrder, payment_pending: null }]), {
+    payout: 1795, count: 2, excluded: 1
+  });
 });
 
 test('semana é de segunda a domingo, com repasse na quarta seguinte', () => {

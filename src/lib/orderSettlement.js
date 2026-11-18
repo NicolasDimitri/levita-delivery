@@ -75,6 +75,19 @@ export function dailyStoreEntries(orders, date, storeId) {
     .map(settlementEntry);
 }
 
+export function summarizeSettlement(orders) {
+  const result = { payout: 0, count: 0, excluded: 0 };
+  for (const order of orders) {
+    const { calculation, reason } = settlementEntry(order);
+    if (reason) result.excluded++;
+    else {
+      result.payout += calculation.payout;
+      result.count++;
+    }
+  }
+  return result;
+}
+
 export function weekFor(date) {
   const selected = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(selected.getTime())) throw new Error('Data inválida');
