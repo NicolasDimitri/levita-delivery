@@ -155,6 +155,22 @@ Para a aba Saldo, execute também `supabase/migration_order_settlement_history.s
 
 Se `migration_order_service_fee.sql` já tiver sido executada no banco, execute também `supabase/migration_remove_order_service_fee.sql` para remover a coluna não utilizada `service_fee`.
 
+**Estoque:** acesse **Estoque** no painel de pedidos para cadastrar locais e itens, consultar saldos e registrar aumentos ou diminuições com justificativa. Escolha um único local compartilhado para itens usados pelas três lojas. O saldo mostrado pertence ao local selecionado; o cadastro do item não cria estoque automaticamente.
+
+Antes de usar a tela em cada ambiente, execute `supabase/migration_inventory.sql` uma vez no banco Supabase com o schema existente. A migração foi executada em desenvolvimento, mas **ainda precisa ser executada em produção** antes da publicação. Para um banco novo, rode também essa migração após o schema principal.
+
+Cadastre locais em `inventory_locations` (por exemplo, cozinha central e cada loja), itens em `inventory_items` e fichas técnicas em `inventory_recipes` e `inventory_recipe_ingredients`. Cada item tem uma unidade fixa: gramas (`g`), mililitros (`ml`) ou unidades (`un`), com até três casas decimais. Cadastre cru e preparado como itens distintos: 1 kg de carne crua são 1.000 g e 700 g de carne cozida são outro item. A ficha técnica guarda as quantidades e o rendimento **esperados**, não uma conversão automática.
+
+Administradores autenticados registram movimentos pelas funções RPC, cada uma com um UUID de operação novo:
+
+- `inventory_record_movement`: entrada (`entry`), perda (`loss`) ou ajuste (`adjustment`). Entrada e perda usam quantidade positiva; ajuste aceita valor positivo ou negativo. Perdas e ajustes exigem justificativa em `p_note`.
+- `inventory_transfer`: transfere o mesmo item entre dois locais.
+- `inventory_produce`: informa a receita, local, quantidade **real** produzida e ingredientes **realmente** utilizados em `p_inputs`, uma lista como `[{"item_id":"UUID-DO-ITEM","quantity":1000}]`. Insumos e produto final devem estar no mesmo local; transfira-os antes ou depois quando necessário. Os ingredientes reais podem diferir da ficha técnica.
+
+Os saldos e movimentos são atualizados juntos; saldo insuficiente cancela a operação inteira. Após uma falha de comunicação, a tela mantém a operação pendente neste navegador e permite reenviá-la com o mesmo UUID, evitando duplicação. Não apague os dados do navegador nem registre a mesma movimentação em outro dispositivo antes de confirmar seu resultado. Não altere saldos diretamente. Os registros reais ficam no histórico de movimentos; a ficha técnica pode ser editada e não é um retrato histórico do rendimento esperado. A execução das RPCs exige sessão de administrador (`auth.uid()`), inclusive durante testes; o SQL Editor sem sessão de usuário não substitui essa autenticação.
+
+Ainda não há telas de receitas, preparo ou transferência, baixa automática por pedidos, vínculo com códigos do iFood, controle de lotes/validade, custos ou pausa automática de produtos. Antes de usá-los, é necessário implementar essas etapas. O arquivo `supabase/tests/inventory.sql` contém testes transacionais para um banco de teste descartável com o schema e a migração aplicados; ele não deve ser executado em produção.
+
 Para manter um histórico de eventos além da retenção dos logs da Vercel, execute `supabase/migration_ifood_webhook_attempts.sql` no SQL Editor de cada projeto Supabase antes de publicar a alteração. Os registros ficam disponíveis por 30 dias na tabela `public.ifood_webhook_attempts`:
 
 ```sql
