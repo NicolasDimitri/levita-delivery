@@ -5,6 +5,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { TabBar, Button, EmptyState, Badge, ErrorMsg } from '../lib/ui';
 import { fmtBRL } from '../lib/constants';
+import { ordersForActiveColumn } from '../lib/activeOrders';
 import OrderCard from '../components/OrderCard';
 import StoreStatusToggle from '../components/StoreStatusToggle';
 
@@ -196,7 +197,7 @@ export default function AdminPage() {
               ? <p className="text-sm text-gray-400">Carregando...</p>
               : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {ACTIVE_COLUMNS.map(col => {
-                  const colOrders = orders.filter(o => o.status === col.status);
+                  const colOrders = ordersForActiveColumn(orders, col.status);
                   return (
                     <div key={col.status} className="rounded-2xl bg-gray-100 p-3">
                       <p className="mb-3 px-1 text-xs font-bold uppercase tracking-wide text-gray-500">
