@@ -165,6 +165,8 @@ order by received_at desc
 limit 100;
 ```
 
+**Clientes problemáticos:** antes de publicar a funcionalidade, execute `supabase/migration_customer_problem_flag.sql` no SQL Editor do Supabase. No painel administrativo, é possível marcar um cliente pelo cartão de qualquer pedido; o alerta e o motivo opcional aparecem nos pedidos seguintes desse cliente. A marcação é apenas informativa e pode ser removida no próprio cartão.
+
 ---
 
 ## 5. Como testar o fluxo de ponta a ponta

@@ -39,7 +39,7 @@ export default function AdminPage() {
 
   const loadOrders = useCallback(async () => {
     const { data, error } = await supabase
-      .from('orders').select('*, order_items(*, order_item_additions(*))')
+      .from('orders').select('*, cliente:clientes(problematic, motivo_problematico), order_items(*, order_item_additions(*))')
       .not('status', 'in', '("entregue","cancelado")')
       .order('created_at', { ascending: false });
     if (error) {
@@ -54,7 +54,7 @@ export default function AdminPage() {
 
   const loadFinalOrders = useCallback(async () => {
     const { data } = await supabase
-      .from('orders').select('*, order_items(*, order_item_additions(*))')
+      .from('orders').select('*, cliente:clientes(problematic, motivo_problematico), order_items(*, order_item_additions(*))')
       .in('status', ['entregue', 'cancelado'])
       .order('created_at', { ascending: false }).limit(50);
     setFinalOrders(data || []);

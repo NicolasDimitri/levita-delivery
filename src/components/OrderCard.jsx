@@ -23,6 +23,8 @@ export default function OrderCard({ order, drivers, onChanged }) {
   const [routeAddress, setRouteAddress] = useState(order.route_address || '');
   const [error, setError] = useState('');
   const [cancellationPending, setCancellationPending] = useState(false);
+  const [showProblemEditor, setShowProblemEditor] = useState(false);
+  const [problemReason, setProblemReason] = useState('');
 
   useEffect(() => {
     setRouteAddress(order.route_address || '');
@@ -95,6 +97,33 @@ export default function OrderCard({ order, drivers, onChanged }) {
     if (updateError) throw updateError;
   });
 
+  const saveCustomerProblem = () => run('customer-problem', async () => {
+    if (!order.ifood_customer_id) throw new Error('Este pedido não tem um cliente identificado pelo iFood.');
+    const { error: updateError } = await supabase
+      .from('clientes')
+      .update({
+        problematic: true,
+        motivo_problematico: problemReason.trim() || null
+      })
+      .eq('ifood_customer_id', order.ifood_customer_id)
+      .select('ifood_customer_id')
+      .single();
+    if (updateError) throw updateError;
+    setProblemReason('');
+    setShowProblemEditor(false);
+  });
+
+  const clearCustomerProblem = () => run('customer-problem', async () => {
+    if (!order.ifood_customer_id) throw new Error('Este pedido não tem um cliente identificado pelo iFood.');
+    const { error: updateError } = await supabase
+      .from('clientes')
+      .update({ problematic: false, motivo_problematico: null })
+      .eq('ifood_customer_id', order.ifood_customer_id)
+      .select('ifood_customer_id')
+      .single();
+    if (updateError) throw updateError;
+  });
+
   const assignDriver = (driverId) => {
     run('assign', async () => {
       await call('/api/ifood/assign-driver', {
@@ -128,6 +157,68 @@ export default function OrderCard({ order, drivers, onChanged }) {
         </div>
         <Badge color={status.color}>{status.label}</Badge>
       </div>
+
+      {order.cliente?.problematic && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+          <p className="text-sm font-semibold text-red-800">Cliente marcado como problemático</p>
+          {order.cliente.motivo_problematico && (
+            <p className="mt-1 whitespace-pre-wrap text-xs text-red-700">{order.cliente.motivo_problematico}</p>
+          )}
+        </div>
+      )}
+      {order.ifood_customer_id && (
+        <div className="space-y-2">
+          {order.cliente?.problematic ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={clearCustomerProblem}
+              disabled={loading('customer-problem')}
+              className="w-full"
+            >
+              {loading('customer-problem') ? 'Removendo alerta...' : 'Remover marcação de cliente problemático'}
+            </Button>
+          ) : showProblemEditor ? (
+            <div className="space-y-2 rounded-xl border border-gray-200 p-3">
+              <label className="block text-xs font-medium text-gray-600" htmlFor={`problem-reason-${order.id}`}>
+                Motivo (opcional)
+              </label>
+              <textarea
+                id={`problem-reason-${order.id}`}
+                value={problemReason}
+                onChange={event => setProblemReason(event.target.value)}
+                maxLength={500}
+                rows={2}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+                placeholder="Descreva o ocorrido para orientar a equipe"
+              />
+              <div className="flex gap-2">
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={saveCustomerProblem}
+                  disabled={loading('customer-problem')}
+                  className="flex-1"
+                >
+                  {loading('customer-problem') ? 'Salvando...' : 'Marcar como problemático'}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setShowProblemEditor(false)}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowProblemEditor(true)}
+              className="w-full"
+            >
+              Marcar cliente como problemático
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* temporizador */}
       {order.status === 'recebido' && (
