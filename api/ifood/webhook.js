@@ -43,8 +43,6 @@ export default async function handler(req, res) {
   const startedAt = Date.now();
   console.log('=== [API /api/ifood/webhook] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
-    url: req.url,
-    query: req.query,
     hasSignature: Boolean(req.headers['x-ifood-signature'])
   });
 
