@@ -6,6 +6,7 @@ import AdminPage from './pages/AdminPage';
 import DriverPage from './pages/DriverPage';
 import ExpensesPage from './pages/ExpensesPage';
 import IfoodHomologationPage from './pages/IfoodHomologationPage';
+import InventoryPage from './pages/InventoryPage';
 import DevBanner from './components/DevBanner';
 
 function PrivateRoute({ role, children }) {
@@ -73,6 +74,15 @@ export default function App() {
           element={
             <PrivateRoute role="admin">
               <IfoodHomologationPage />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/estoque"
+          element={
+            <PrivateRoute role="admin">
+              <InventoryPage />
             </PrivateRoute>
           }
         />

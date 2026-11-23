@@ -5,7 +5,7 @@ import { Button, Badge, SectionLabel, ErrorMsg } from '../lib/ui';
 import CountdownTimer from './CountdownTimer';
 import { ORDER_STATUS, fmtBRL, fmtDate } from '../lib/constants';
 import { supabase } from '../supabaseClient';
-import { isMissingStreetNumber } from '../../lib/deliveryAddress';
+import { getOrderDestinationCoordinates, parseCoordinatePair } from '../../lib/deliveryAddress';
 import OrderDiscounts from './OrderDiscounts';
 
 export { ORDER_STATUS };
@@ -20,17 +20,21 @@ export default function OrderCard({ order, drivers, onChanged }) {
   const [showDriverSelector, setShowDriverSelector] = useState(false);
   const [cancellationReasons, setCancellationReasons] = useState([]);
   const [selectedCancellation, setSelectedCancellation] = useState('');
-  const [routeAddress, setRouteAddress] = useState(order.route_address || '');
+  const [showCoordinates, setShowCoordinates] = useState(false);
+  const [coordinateInput, setCoordinateInput] = useState('');
   const [error, setError] = useState('');
   const [cancellationPending, setCancellationPending] = useState(false);
+  const [showProblemEditor, setShowProblemEditor] = useState(false);
+  const [problemReason, setProblemReason] = useState('');
 
   useEffect(() => {
-    setRouteAddress(order.route_address || '');
-  }, [order.route_address]);
+    const coordinates = getOrderDestinationCoordinates(order);
+    setCoordinateInput(coordinates ? `${coordinates.latitude}, ${coordinates.longitude}` : '');
+  }, [order.latitude, order.longitude, order.route_latitude, order.route_longitude]);
 
   const status = ORDER_STATUS[order.status] ?? ORDER_STATUS.recebido;
-  const needsRouteAddress = !order.street || isMissingStreetNumber(order.street_number);
-  const routeAddressChanged = routeAddress.trim() !== (order.route_address || '');
+  const coordinates = getOrderDestinationCoordinates(order);
+  const canEditCoordinates = !['entregue', 'cancelado'].includes(order.status);
 
   async function run(key, fn) {
     setLoadingKey(key);
@@ -82,15 +86,44 @@ export default function OrderCard({ order, drivers, onChanged }) {
     body: { orderId: order.id, action: 'ready' }
   }));
 
-  const saveRouteAddress = () => run('route-address', async () => {
-    const value = routeAddress.trim();
-    if (!value) throw new Error('Informe um endereço ou nome de local para a rota.');
-
-    const { error: updateError } = await supabase
+  const saveCoordinates = (restore = false) => run('coordinates', async () => {
+    const value = restore ? null : parseCoordinatePair(coordinateInput);
+    if (!restore && !value) throw new Error('Informe latitude e longitude válidas, separadas por vírgula.');
+    const { data: updated, error: updateError } = await supabase
       .from('orders')
-      .update({ route_address: value })
+      .update({ route_latitude: value?.latitude ?? null, route_longitude: value?.longitude ?? null })
       .eq('id', order.id)
+      .in('status', ['recebido', 'em_preparo', 'pronto', 'em_rota'])
       .select('id')
+      .maybeSingle();
+    if (updateError) throw updateError;
+    if (!updated) throw new Error('O pedido foi finalizado ou não está mais disponível para alteração.');
+    setShowCoordinates(false);
+  });
+
+  const saveCustomerProblem = () => run('customer-problem', async () => {
+    if (!order.ifood_customer_id) throw new Error('Este pedido não tem um cliente identificado pelo iFood.');
+    const { error: updateError } = await supabase
+      .from('clientes')
+      .update({
+        problematic: true,
+        motivo_problematico: problemReason.trim() || null
+      })
+      .eq('ifood_customer_id', order.ifood_customer_id)
+      .select('ifood_customer_id')
+      .single();
+    if (updateError) throw updateError;
+    setProblemReason('');
+    setShowProblemEditor(false);
+  });
+
+  const clearCustomerProblem = () => run('customer-problem', async () => {
+    if (!order.ifood_customer_id) throw new Error('Este pedido não tem um cliente identificado pelo iFood.');
+    const { error: updateError } = await supabase
+      .from('clientes')
+      .update({ problematic: false, motivo_problematico: null })
+      .eq('ifood_customer_id', order.ifood_customer_id)
+      .select('ifood_customer_id')
       .single();
     if (updateError) throw updateError;
   });
@@ -129,6 +162,68 @@ export default function OrderCard({ order, drivers, onChanged }) {
         <Badge color={status.color}>{status.label}</Badge>
       </div>
 
+      {order.cliente?.problematic && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+          <p className="text-sm font-semibold text-red-800">Cliente marcado como problemático</p>
+          {order.cliente.motivo_problematico && (
+            <p className="mt-1 whitespace-pre-wrap text-xs text-red-700">{order.cliente.motivo_problematico}</p>
+          )}
+        </div>
+      )}
+      {order.ifood_customer_id && (
+        <div className="space-y-2">
+          {order.cliente?.problematic ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={clearCustomerProblem}
+              disabled={loading('customer-problem')}
+              className="w-full"
+            >
+              {loading('customer-problem') ? 'Removendo alerta...' : 'Remover marcação de cliente problemático'}
+            </Button>
+          ) : showProblemEditor ? (
+            <div className="space-y-2 rounded-xl border border-gray-200 p-3">
+              <label className="block text-xs font-medium text-gray-600" htmlFor={`problem-reason-${order.id}`}>
+                Motivo (opcional)
+              </label>
+              <textarea
+                id={`problem-reason-${order.id}`}
+                value={problemReason}
+                onChange={event => setProblemReason(event.target.value)}
+                maxLength={500}
+                rows={2}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+                placeholder="Descreva o ocorrido para orientar a equipe"
+              />
+              <div className="flex gap-2">
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={saveCustomerProblem}
+                  disabled={loading('customer-problem')}
+                  className="flex-1"
+                >
+                  {loading('customer-problem') ? 'Salvando...' : 'Marcar como problemático'}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setShowProblemEditor(false)}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowProblemEditor(true)}
+              className="w-full"
+            >
+              Marcar cliente como problemático
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* temporizador */}
       {order.status === 'recebido' && (
         <CountdownTimer target={new Date(new Date(order.created_at).getTime() + 8 * 60 * 1000)} label="Aceitar em" />
@@ -159,32 +254,38 @@ export default function OrderCard({ order, drivers, onChanged }) {
       <OrderDiscounts benefits={order.benefits_raw} total={order.benefits_value} />
 
       <ErrorMsg message={error} />
-      {needsRouteAddress && !['entregue', 'cancelado'].includes(order.status) && (
-        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <p className="text-sm font-medium text-amber-900">
-            Endereço incompleto: informe o destino correto para a rota.
-          </p>
-          <p className="text-xs text-amber-800">
-            Pode ser “Rua, número” ou o nome do hotel, pousada, empresa ou comércio.
-          </p>
-          <input
-            type="text"
-            value={routeAddress}
-            onChange={(event) => setRouteAddress(event.target.value)}
-            maxLength={300}
-            placeholder="Ex.: Rua das Flores, 123 ou Hotel Central"
-            aria-label={`Endereço correto para a rota do pedido ${order.display_id || order.id}`}
-            className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-          />
-          <Button
-            variant="primary"
-            onClick={saveRouteAddress}
-            disabled={!routeAddress.trim() || !routeAddressChanged || loading('route-address')}
-          >
-            {loading('route-address') ? 'Salvando endereço...' : 'Salvar endereço para a rota'}
+      {canEditCoordinates && (
+        <div className="space-y-2">
+          {!coordinates && <p className="text-xs text-red-700">Coordenadas indisponíveis; informe a localização correta.</p>}
+          {order.route_latitude != null && <p className="text-xs text-amber-700">Localização corrigida pelo administrador.</p>}
+          <Button variant="secondary" onClick={() => setShowCoordinates(value => !value)}>
+            {showCoordinates ? 'Fechar localização' : 'Alterar localização'}
           </Button>
-          {order.route_address && !routeAddressChanged && (
-            <p className="text-xs text-green-700">Endereço personalizado salvo para a rota e para cópia.</p>
+          {showCoordinates && (
+            <div className="space-y-2 rounded-xl border border-gray-200 p-3">
+              <label className="block text-xs text-gray-600" htmlFor={`coordinates-${order.id}`}>
+                Latitude, longitude em graus decimais
+              </label>
+              <input
+                id={`coordinates-${order.id}`}
+                type="text"
+                value={coordinateInput}
+                onChange={event => setCoordinateInput(event.target.value)}
+                placeholder="-7.223361, -35.936778"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+              <p className="text-xs text-gray-500">A correção será usada na rota e no cálculo do repasse.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => saveCoordinates()} disabled={loading('coordinates')}>
+                  {loading('coordinates') ? 'Salvando...' : 'Salvar localização'}
+                </Button>
+                {order.route_latitude != null && (
+                  <Button variant="secondary" onClick={() => saveCoordinates(true)} disabled={loading('coordinates')}>
+                    Usar localização do iFood
+                  </Button>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}

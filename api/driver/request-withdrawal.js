@@ -6,8 +6,12 @@
 // do que realmente tem direito mandando um insert direto.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
+import retryRouteEarnings from '../../lib/retryRouteEarnings.js';
 
 export default async function handler(req, res) {
+  if (req.method === 'POST' && req.body?.action === 'retry_route_earnings') {
+    return retryRouteEarnings(req, res);
+  }
   console.log('=== [API /api/driver/request-withdrawal] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
@@ -44,6 +48,21 @@ export default async function handler(req, res) {
     });
   }
 
+  const { data: adjustments, error: adjustmentsError } = await supabaseAdmin
+    .from('driver_balance_adjustments')
+    .select('id')
+    .eq('driver_id', driverId)
+    .limit(1);
+  if (adjustmentsError) {
+    console.error('=== [API /api/driver/request-withdrawal] erro ao verificar ajustes ===', adjustmentsError);
+    return res.status(500).json({ error: 'Erro ao verificar ajustes de saldo' });
+  }
+  if (adjustments.length > 0) {
+    return res.status(409).json({
+      error: 'Este saldo possui ajustes. Solicite o pagamento ao administrador.'
+    });
+  }
+
   // já existe uma solicitação pendente? não deixa duplicar
   const { data: existingPending } = await supabaseAdmin
     .from('withdrawal_requests')
@@ -74,6 +93,10 @@ export default async function handler(req, res) {
   if (historyError) {
     console.error('=== [API /api/driver/request-withdrawal] erro ao buscar delivery_history ===', historyError);
     return res.status(500).json({ error: 'Erro ao calcular saldo disponível' });
+  }
+
+  if ((history || []).some(row => row.valor_entrega === null)) {
+    return res.status(409).json({ error: 'Há entregas com repasse pendente de cálculo. Procure o administrador.' });
   }
 
   const availableRows = (history || []).filter((row) => !withdrawnIds.has(row.id));

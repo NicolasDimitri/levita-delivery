@@ -1,10 +1,12 @@
 // src/pages/DriverPage.jsx
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import DeliveryCard from '../components/DeliveryCard';
 import AvailableOrderCard from '../components/AvailableOrderCard';
 import { useApi } from '../lib/useApi';
+import { fmtBRL } from '../lib/constants';
+import { calculateDriverBalance } from '../lib/driverBalance';
 import {
   buildGoogleMapsRouteBatches,
   getGoogleMapsDestination,
@@ -30,7 +32,9 @@ export default function DriverPage() {
   const [availableOrders, setAvailableOrders] = useState([]);
   const [finishedOrders, setFinishedOrders] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
-  const [balance, setBalance] = useState(0);
+  const [adjustments, setAdjustments] = useState([]);
+  const [balance, setBalance] = useState(null);
+  const [pendingEarningsCount, setPendingEarningsCount] = useState(0);
   const [totalWithdrawn, setTotalWithdrawn] = useState(0);
   const [loading, setLoading] = useState(true);
   const [withdrawNote, setWithdrawNote] = useState('');
@@ -41,6 +45,7 @@ export default function DriverPage() {
   const [dispatchMessage, setDispatchMessage] = useState('');
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [navigationApp, setNavigationApp] = useState(getPreferredNavigationApp);
+  const balanceRequest = useRef(0);
 
   const loadOrders = useCallback(async () => {
     const { data, error } = await supabase
@@ -82,7 +87,8 @@ export default function DriverPage() {
   }, [session]);
 
   const loadBalance = useCallback(async () => {
-    const [{ data: hist, error: historyError }, { data: wdr, error: withdrawalsError }] = await Promise.all([
+    const requestId = ++balanceRequest.current;
+    const [{ data: hist, error: historyError }, { data: wdr, error: withdrawalsError }, { data: adj, error: adjustmentsError }] = await Promise.all([
       supabase
         .from('delivery_history')
         .select('valor_entrega')
@@ -90,21 +96,28 @@ export default function DriverPage() {
       supabase
         .from('withdrawals')
         .select('valor')
+        .eq('driver_id', session.user.id),
+      supabase
+        .from('driver_balance_adjustments')
+        .select('id, amount, reason, created_at')
         .eq('driver_id', session.user.id)
+        .order('created_at', { ascending: false })
     ]);
 
-    if (historyError || withdrawalsError) {
-      console.error('Não foi possível carregar o saldo do entregador', historyError || withdrawalsError);
+    if (requestId !== balanceRequest.current) return;
+    if (historyError || withdrawalsError || adjustmentsError) {
+      console.error('Não foi possível carregar o saldo do entregador', historyError || withdrawalsError || adjustmentsError);
       setBalanceError('Não foi possível atualizar o saldo. Tente atualizar a página.');
       return;
     }
 
-    const earned = (hist || []).reduce((s, r) => s + Number(r.valor_entrega), 0);
     const withdrawn = (wdr || []).reduce((s, r) => s + Number(r.valor), 0);
 
     setBalanceError('');
     setTotalWithdrawn(withdrawn);
-    setBalance(Math.max(0, earned - withdrawn));
+    setAdjustments(adj || []);
+    setPendingEarningsCount((hist || []).filter(row => row.valor_entrega === null).length);
+    setBalance(calculateDriverBalance(hist || [], wdr || [], adj || []));
   }, [session]);
 
   const loadWithdrawals = useCallback(async () => {
@@ -139,6 +152,10 @@ export default function DriverPage() {
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'withdrawals', filter: `driver_id=eq.${session.user.id}` },
         () => { loadBalance(); if (tab === 'saque') loadWithdrawals(); }
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'driver_balance_adjustments', filter: `driver_id=eq.${session.user.id}` },
+        () => loadBalance()
       )
       .subscribe((status, error) => {
         const connected = status === 'SUBSCRIBED';
@@ -193,8 +210,8 @@ export default function DriverPage() {
     order,
     ...getGoogleMapsDestination(order)
   }));
-  const ordersWithoutAddress = routeStops.filter((stop) => !stop.destination).length;
-  const route = routeOrders.length === 0 || ordersWithoutAddress
+  const ordersWithoutCoordinates = routeStops.filter((stop) => !stop.destination).length;
+  const route = routeOrders.length === 0 || ordersWithoutCoordinates
     ? { batches: [], failedIndex: -1 }
     : buildGoogleMapsRouteBatches([
       ...routeStops.map((stop) => stop.destination),
@@ -254,7 +271,7 @@ export default function DriverPage() {
           <div className="flex items-center gap-3">
             <div className="text-right">
               <p className="text-xs text-gray-400">Saldo</p>
-              <p className="text-sm font-bold text-green-700">R$ {balance.toFixed(2)}</p>
+              <p className="text-sm font-bold text-green-700">{balance === null ? '—' : `R$ ${balance.toFixed(2)}`}</p>
               {balanceError && <p className="max-w-32 text-xs text-red-600">{balanceError}</p>}
             </div>
             <button onClick={signOut} className="text-xs text-gray-400 hover:text-gray-700">Sair</button>
@@ -346,14 +363,14 @@ export default function DriverPage() {
                     </div>
                   </div>
                 )}
-                {ordersWithoutAddress > 0 && (
+                {ordersWithoutCoordinates > 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
-                    {ordersWithoutAddress} entrega(s) aguardando endereço correto cadastrado pelo administrador.
+                    {ordersWithoutCoordinates} entrega(s) sem coordenadas válidas. Avise o administrador.
                   </p>
                 )}
                 {route.failedIndex >= 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
-                    Não foi possível criar a rota a partir da parada {route.failedIndex + 1}; confira o tamanho ou conteúdo do endereço.
+                    Não foi possível criar a rota a partir da parada {route.failedIndex + 1}; confira as coordenadas.
                   </p>
                 )}
                 {ordersWaitingForReady.length > 0 && (
@@ -415,16 +432,35 @@ export default function DriverPage() {
           <div className="space-y-4">
             {/* resumo */}
             <div className="rounded-2xl bg-green-600 p-5 text-white shadow">
-              <p className="text-xs font-medium uppercase tracking-wide opacity-80">Saldo disponível</p>
-              <p className="mt-1 text-4xl font-bold">R$ {balance.toFixed(2)}</p>
-              <p className="mt-1 text-xs opacity-70">Total sacado: R$ {totalWithdrawn.toFixed(2)}</p>
+              <p className="text-xs font-medium uppercase tracking-wide opacity-80">Saldo</p>
+              <p className="mt-1 text-4xl font-bold">{balance === null ? '—' : `R$ ${fmtBRL(balance)}`}</p>
+              <p className="mt-1 text-xs opacity-70">Total sacado: R$ {fmtBRL(totalWithdrawn)}</p>
+              {balance < 0 && <p className="mt-1 text-xs">Saldo negativo será compensado por ganhos futuros.</p>}
               {balanceError && <p className="mt-2 text-sm text-white">{balanceError}</p>}
+              {pendingEarningsCount > 0 && (
+                <p className="mt-2 text-sm">{pendingEarningsCount} entrega(s) com repasse pendente de cálculo, ainda não incluído no saldo.</p>
+              )}
             </div>
 
             {/* instrução */}
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
               Para solicitar o saque, informe seu nome e envie uma mensagem para o administrador. O valor será transferido manualmente e seu saldo será zerado.
             </div>
+
+            {adjustments.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Ajustes de saldo</p>
+                {adjustments.map(item => (
+                  <div key={item.id} className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">{item.reason}</p>
+                      <p className="text-xs text-gray-400">{new Date(item.created_at).toLocaleDateString('pt-BR')}</p>
+                    </div>
+                    <span className="shrink-0 text-sm font-medium">{Number(item.amount) > 0 ? '+' : '−'} R$ {fmtBRL(Math.abs(Number(item.amount)))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* histórico de saques */}
             <div>
@@ -461,7 +497,7 @@ export default function DriverPage() {
               </button>
             )}
             {navigationApp === 'google-maps' && routeOrders.length > 0 && (
-              route.batches.length > 0 && route.failedIndex < 0 && ordersWithoutAddress === 0
+              route.batches.length > 0 && route.failedIndex < 0 && ordersWithoutCoordinates === 0
                 ? route.batches.map((batch, index) => (
                     <a
                       key={`${index}-${batch.url}`}
@@ -481,7 +517,7 @@ export default function DriverPage() {
                       disabled
                       className="w-full rounded-lg bg-gray-300 py-3 text-sm font-semibold text-gray-600"
                     >
-                      Rota indisponível: verifique os endereços
+                      Rota indisponível: verifique as coordenadas
                     </button>
                   )
             )}

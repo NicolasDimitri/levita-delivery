@@ -11,7 +11,7 @@
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { verifyDeliveryCode } from '../../lib/ifood.js';
-import { DRIVER_EARNING_PER_DELIVERY } from '../../lib/driverEarnings.js';
+import { recordDriverEarnings } from '../../lib/driverRouteEarnings.js';
 
 export default async function handler(req, res) {
   console.log('=== [API /api/ifood/verify-delivery] REQUISIÇÃO RECEBIDA ===', {
@@ -126,7 +126,7 @@ export default async function handler(req, res) {
       ? updateOrderQuery.eq('driver_id', order.driver_id)
       : updateOrderQuery.is('driver_id', null);
     const { data: updatedOrder, error: updateOrderError } = await updateOrderQuery
-      .select('id')
+      .select('id, driver_id, latitude, longitude, route_latitude, route_longitude')
       .maybeSingle();
 
     if (updateOrderError) {
@@ -153,23 +153,8 @@ export default async function handler(req, res) {
       }
     }
 
-    if (order.driver_id) {
-      const { data: existingHistory, error: historyLookupError } = await supabaseAdmin
-        .from('delivery_history')
-        .select('id')
-        .eq('order_id', order.id)
-        .limit(1)
-        .maybeSingle();
-      if (historyLookupError) throw historyLookupError;
-
-      if (!existingHistory) {
-        const { error: historyError } = await supabaseAdmin.from('delivery_history').insert({
-          driver_id: order.driver_id,
-          order_id: order.id,
-          valor_entrega: DRIVER_EARNING_PER_DELIVERY
-        });
-        if (historyError) throw historyError;
-      }
+    if (updatedOrder.driver_id) {
+      await recordDriverEarnings(supabaseAdmin, updatedOrder);
     }
   } catch (err) {
     console.error('=== [VERIFY-DELIVERY] erro inesperado pós-confirmação iFood ===', err);

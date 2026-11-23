@@ -125,6 +125,7 @@ No painel administrativo, abra **Homologação iFood** para executar os cenário
    - `IFOOD_CLIENT_ID`
    - `IFOOD_CLIENT_SECRET`
    - `IFOOD_MERCHANT_IDS`
+   - `ORS_API_KEY` (chave privada do openrouteservice, somente no servidor)
 4. Clique em **Deploy**
 5. Depois do primeiro deploy, volte no passo **2.3** e configure a URL do webhook com o domínio que a Vercel te deu
 
@@ -151,9 +152,15 @@ Isso roda frontend + funções serverless juntos localmente.
 
 **Despacho sem confirmação:** se o Gestor de Pedidos do iFood mostrar o pedido como despachado/em rota, mas o painel continuar em “Pronto”, use **Sincronizar após confirmar no iFood** no cartão do pedido. Essa ação não chama o iFood nem reenvia o despacho; apenas corrige o status local após a confirmação manual.
 
-**Rotas do entregador:** o destino usa rua e número, e a rota inclui apenas pedidos despachados para o entregador. É possível escolher Google Maps (rota com várias paradas, no modo de duas rodas) ou Waze (navegação de um destino por vez). A rota termina no endereço da loja, Pedro da Costa Agra, 296, Campina Grande/PB; coordenadas não são usadas para gerar a rota. Se faltar rua ou o número for `S/N`, `0` ou estiver vazio, o administrador precisa cadastrar um endereço ou nome de local no aviso do pedido. Esse endereço personalizado será usado tanto na rota quanto no botão de cópia. Em bancos existentes, execute `supabase/migration_add_route_address.sql` no SQL Editor antes de publicar essa versão.
+**Rotas do entregador:** antes de publicar, execute `supabase/migration_order_route_coordinates.sql` no banco de cada ambiente e atualize também a Edge Function `ifood-webhook`. Google Maps e Waze usam as coordenadas do iFood; a rota inclui apenas pedidos despachados, e o Google Maps mantém o retorno ao endereço da loja. O botão de cópia usa rua, número e bairro, não as coordenadas. O antigo endereço personalizado (`route_address`) deixa de ser usado para navegação e cópia.
 
-**Saldo do entregador:** cada entrega concluída credita R$ 5,00, independentemente da taxa de entrega do iFood. Antes de publicar a correção, execute `supabase/migration_fix_driver_delivery_earnings.sql` no SQL Editor. A migração corrige os valores já registrados no histórico para R$ 5,00 por entrega e habilita atualizações em tempo real do saldo.
+No cartão do pedido, o administrador pode alterar a localização informando latitude e longitude decimais separadas por vírgula ou restaurar as coordenadas originais do iFood. A correção vale para a rota e o cálculo do repasse, e só pode ser feita antes da conclusão; repasses já registrados não são recalculados. O entregador deve abrir a rota novamente após uma alteração. Se faltarem coordenadas válidas, a rota é bloqueada e o administrador é avisado; a cópia do endereço continua disponível quando houver dados.
+
+**Saldo do entregador:** antes de publicar, execute `supabase/migration_driver_route_earnings.sql` e configure `ORS_API_KEY` tanto nas variáveis da Vercel quanto nos segredos da Edge Function no Supabase, para cada ambiente utilizado. A confirmação e a nova tentativa usam a chave na Vercel; o webhook usa a chave no Supabase. Publique também a Edge Function `ifood-webhook` com o código atualizado. A migração preserva os valores históricos e exige que não existam registros duplicados de `delivery_history.order_id`; se houver, confira-os e resolva-os antes de executá-la. Não execute novamente a antiga `migration_fix_driver_delivery_earnings.sql`, pois ela sobrescreve os valores históricos.
+
+Novas entregas usam a rota mais curta de carro do openrouteservice, da loja (latitude -7.224483, longitude -35.868339) até as coordenadas do pedido: até 2,5 km, R$ 5; acima de 2,5 até 3,5 km, R$ 6; acima de 3,5 até 4,5 km, R$ 7; acima de 4,5 km, R$ 8. Usa-se a distância exata retornada, sem truncamento. O perfil é de carro, não moto. Entregas sem coordenadas ou cuja consulta falhe ficam sem crédito, sinalizadas como pendentes na carteira e na aba Entregadores; o administrador pode tentar novamente nessa aba. Para um pedido já concluído sem coordenadas válidas, é necessário corrigir os dados no banco antes de tentar novamente. O saldo mostrado não inclui repasses pendentes.
+
+**Ajustes de saldo:** execute `supabase/migration_driver_balance_adjustments.sql` no SQL Editor antes de publicar esta versão. Na aba Entregadores, o administrador pode somar ou subtrair valores informando o motivo; os ajustes aparecem também na carteira do entregador. Descontos podem deixar o saldo negativo, compensado por ganhos futuros. O saldo é a soma das entregas e dos ajustes, menos os pagamentos registrados. O endpoint legado de solicitação de saque não aceita saldos com ajustes ou repasses pendentes; o pagamento continua sendo registrado manualmente pelo administrador. Ajustes não alteram os valores das entregas nem são lançados automaticamente.
 
 **Preview — aceite e despacho pelo entregador:** antes de testar esta alteração, execute `supabase/migration_driver_self_assignment.sql` no SQL Editor do projeto Supabase de desenvolvimento/preview. Ela libera a listagem segura de pedidos disponíveis, o aceite atômico com limite de 3 entregas ativas, a reatribuição administrativa e a trava de despacho. Não execute essa migração no projeto de produção enquanto a alteração não for aprovada.
 
@@ -162,6 +169,22 @@ Isso roda frontend + funções serverless juntos localmente.
 Para a aba Saldo, execute também `supabase/migration_order_settlement_history.sql` no banco Supabase. O saldo é a soma dos repasses estimados no histórico de pedidos concluídos, inclusive a semana em andamento; não representa o saldo bancário nem os repasses oficiais. Semanas e lojas com pedidos não calculáveis apresentam valores parciais.
 
 Se `migration_order_service_fee.sql` já tiver sido executada no banco, execute também `supabase/migration_remove_order_service_fee.sql` para remover a coluna não utilizada `service_fee`.
+
+**Estoque:** acesse **Estoque** no painel de pedidos para cadastrar locais e itens, consultar saldos e registrar aumentos ou diminuições com justificativa. Escolha um único local compartilhado para itens usados pelas três lojas. O saldo mostrado pertence ao local selecionado; o cadastro do item não cria estoque automaticamente.
+
+Antes de usar a tela em cada ambiente, execute `supabase/migration_inventory.sql` uma vez no banco Supabase com o schema existente. A migração foi executada em desenvolvimento, mas **ainda precisa ser executada em produção** antes da publicação. Para um banco novo, rode também essa migração após o schema principal.
+
+Cadastre locais em `inventory_locations` (por exemplo, cozinha central e cada loja), itens em `inventory_items` e fichas técnicas em `inventory_recipes` e `inventory_recipe_ingredients`. Cada item tem uma unidade fixa: gramas (`g`), mililitros (`ml`) ou unidades (`un`), com até três casas decimais. Cadastre cru e preparado como itens distintos: 1 kg de carne crua são 1.000 g e 700 g de carne cozida são outro item. A ficha técnica guarda as quantidades e o rendimento **esperados**, não uma conversão automática.
+
+Administradores autenticados registram movimentos pelas funções RPC, cada uma com um UUID de operação novo:
+
+- `inventory_record_movement`: entrada (`entry`), perda (`loss`) ou ajuste (`adjustment`). Entrada e perda usam quantidade positiva; ajuste aceita valor positivo ou negativo. Perdas e ajustes exigem justificativa em `p_note`.
+- `inventory_transfer`: transfere o mesmo item entre dois locais.
+- `inventory_produce`: informa a receita, local, quantidade **real** produzida e ingredientes **realmente** utilizados em `p_inputs`, uma lista como `[{"item_id":"UUID-DO-ITEM","quantity":1000}]`. Insumos e produto final devem estar no mesmo local; transfira-os antes ou depois quando necessário. Os ingredientes reais podem diferir da ficha técnica.
+
+Os saldos e movimentos são atualizados juntos; saldo insuficiente cancela a operação inteira. Após uma falha de comunicação, a tela mantém a operação pendente neste navegador e permite reenviá-la com o mesmo UUID, evitando duplicação. Não apague os dados do navegador nem registre a mesma movimentação em outro dispositivo antes de confirmar seu resultado. Não altere saldos diretamente. Os registros reais ficam no histórico de movimentos; a ficha técnica pode ser editada e não é um retrato histórico do rendimento esperado. A execução das RPCs exige sessão de administrador (`auth.uid()`), inclusive durante testes; o SQL Editor sem sessão de usuário não substitui essa autenticação.
+
+Ainda não há telas de receitas, preparo ou transferência, baixa automática por pedidos, vínculo com códigos do iFood, controle de lotes/validade, custos ou pausa automática de produtos. Antes de usá-los, é necessário implementar essas etapas. O arquivo `supabase/tests/inventory.sql` contém testes transacionais para um banco de teste descartável com o schema e a migração aplicados; ele não deve ser executado em produção.
 
 Para manter um histórico de eventos além da retenção dos logs da Vercel, execute `supabase/migration_ifood_webhook_attempts.sql` no SQL Editor de cada projeto Supabase antes de publicar a alteração. Os registros ficam disponíveis por 30 dias na tabela `public.ifood_webhook_attempts`:
 
@@ -172,6 +195,27 @@ where code = 'DSP' or order_id = 'ID_DO_PEDIDO_NO_IFOOD'
 order by received_at desc
 limit 100;
 ```
+
+**Clientes problemáticos:** antes de publicar a funcionalidade, execute `supabase/migration_customer_problem_flag.sql` no SQL Editor do Supabase. No painel administrativo, é possível marcar um cliente pelo cartão de qualquer pedido; o alerta e o motivo opcional aparecem nos pedidos seguintes desse cliente. A marcação é apenas informativa e pode ser removida no próprio cartão.
+
+### Webhook no Supabase
+
+A Edge Function `ifood-webhook` reutiliza o processamento e a validação de assinatura do webhook da Vercel. A publicação da função não altera automaticamente a URL cadastrada no iFood.
+
+1. Confirme o **Project Reference ID** do ambiente escolhido e que o banco possui as tabelas e migrações necessárias, incluindo `webhook_events` e `ifood_webhook_attempts`. Aplique `supabase/migration_ifood_webhook_attempts.sql` somente se necessário.
+2. Em **Edge Functions → Secrets** do projeto escolhido, configure `IFOOD_CLIENT_ID` e `IFOOD_CLIENT_SECRET` com as credenciais da aplicação iFood correspondente ao ambiente. Não coloque esses valores no repositório. `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` são fornecidos pelo Supabase à função.
+3. Após autenticar a CLI do Supabase, publique no projeto escolhido:
+
+   ```sh
+   npx supabase@3.2.0 functions deploy ifood-webhook --use-api --remote=ID_DO_PROJETO --no-verify-jwt
+   ```
+
+4. Antes de alterar o endereço no iFood, confira a implantação e teste uma requisição sem assinatura: ela deve receber `401`. A função não usa JWT do Supabase porque o iFood não o envia; a assinatura HMAC do iFood continua obrigatória.
+5. Configure na aplicação iFood correspondente a URL `https://ID_DO_PROJETO.supabase.co/functions/v1/ifood-webhook`. Antes de migrar produção, valide um pedido completo em desenvolvimento. Na troca de produção, mantenha a URL anterior da Vercel para reversão e acompanhe o recebimento dos eventos e pedidos.
+
+Monitore os logs e o uso de Edge Functions no Supabase e os de CPU na Vercel. Pausar o projeto Supabase de desenvolvimento também interrompe o webhook.
+
+Para limpar os registros do banco de desenvolvimento, execute `supabase/migration_dev_webhook_cleanup.sql` **somente no projeto de desenvolvimento**. Ela agenda no Supabase, diariamente às 06:00 UTC, a exclusão de eventos com mais de 48 horas e tentativas com mais de 30 dias. A limpeza de produção continua agendada na Vercel.
 
 ---
 

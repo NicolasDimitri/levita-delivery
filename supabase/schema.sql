@@ -72,6 +72,8 @@ create table public.clientes (
   id uuid primary key default gen_random_uuid(),
   ifood_customer_id text not null unique,
   nome text,
+  problematic boolean not null default false,
+  motivo_problematico text,
   ultimo_codigo_confirmacao text,
   ultimo_codigo_confirmado_em timestamptz,
   created_at timestamptz not null default now()
@@ -183,6 +185,18 @@ create table public.delivery_history (
 
 create index delivery_history_driver_id_idx on public.delivery_history(driver_id);
 
+create table public.driver_balance_adjustments (
+  id uuid primary key default gen_random_uuid(),
+  driver_id uuid not null references public.profiles(id),
+  amount numeric(10,2) not null check (amount <> 0),
+  reason text not null check (length(trim(reason)) between 1 and 300),
+  created_by uuid not null default auth.uid() references public.profiles(id),
+  created_at timestamptz not null default now()
+);
+
+create index driver_balance_adjustments_driver_id_idx
+  on public.driver_balance_adjustments(driver_id);
+
 -- ============================================================
 -- TABELA: withdrawals
 -- Registra cada "zeramento" de saldo, quando o admin repassa o
@@ -223,7 +237,7 @@ create index webhook_events_received_at_idx on public.webhook_events(received_at
 grant usage on schema public to authenticated;
 
 grant select, insert on public.profiles to authenticated;
-grant select on public.clientes to authenticated;
+grant select, update on public.clientes to authenticated;
 
 -- "update" em orders é necessário para o admin alterar o status de preparo
 -- pela interface. A atribuição de entregadores passa pela API serverless,
@@ -234,6 +248,7 @@ grant select, update on public.orders to authenticated;
 grant select on public.order_items to authenticated;
 grant select on public.order_item_additions to authenticated;
 grant select on public.delivery_history to authenticated;
+grant select, insert on public.driver_balance_adjustments to authenticated;
 grant select, insert on public.withdrawals to authenticated;
 
 -- o service_role IGNORA as policies de RLS, mas ainda precisa do GRANT de
@@ -248,6 +263,7 @@ grant all on public.orders to service_role;
 grant all on public.order_items to service_role;
 grant all on public.order_item_additions to service_role;
 grant all on public.delivery_history to service_role;
+grant all on public.driver_balance_adjustments to service_role;
 grant all on public.webhook_events to service_role;
 grant all on public.withdrawals to service_role;
 
@@ -276,6 +292,7 @@ alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.order_item_additions enable row level security;
 alter table public.delivery_history enable row level security;
+alter table public.driver_balance_adjustments enable row level security;
 alter table public.webhook_events enable row level security;
 alter table public.withdrawals enable row level security;
 
@@ -362,6 +379,25 @@ create policy "driver ve seu proprio historico"
   on public.delivery_history for select
   using (driver_id = auth.uid());
 
+create policy "admin ve ajustes de saldo"
+  on public.driver_balance_adjustments for select
+  using (public.is_admin());
+
+create policy "driver ve seus ajustes de saldo"
+  on public.driver_balance_adjustments for select
+  using (driver_id = auth.uid());
+
+create policy "admin registra ajustes de saldo"
+  on public.driver_balance_adjustments for insert
+  with check (
+    public.is_admin()
+    and created_by = auth.uid()
+    and exists (
+      select 1 from public.profiles
+      where profiles.id = driver_id and profiles.role = 'driver'
+    )
+  );
+
 -- ---------- withdrawals ----------
 -- admin: acesso total (registra o pagamento manual feito por fora)
 create policy "admin acesso total a withdrawals"
@@ -381,6 +417,7 @@ create policy "driver ve seus proprios saques"
 -- REALTIME: habilita atualização em tempo real na tabela orders
 -- ============================================================
 alter publication supabase_realtime add table public.orders;
+alter publication supabase_realtime add table public.driver_balance_adjustments;
 
 -- ============================================================
 -- FIM DO SCHEMA
