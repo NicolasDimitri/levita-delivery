@@ -6,14 +6,22 @@ Deno.env.set('VITE_SUPABASE_URL', 'https://test.supabase.co');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-key');
 Deno.env.set('IFOOD_CLIENT_ID', 'test-client');
 Deno.env.set('IFOOD_CLIENT_SECRET', secret);
+Deno.env.set('ORS_API_KEY', 'route-test-key');
 
 let duplicate = false;
 let failLookup = false;
 let simulatePlaced = false;
+let simulateConcluded = false;
+let routeRequest: unknown;
+let savedEarnings: unknown;
 let calls: string[] = [];
 
 globalThis.fetch = (input, init) => {
   const url = new URL(input instanceof Request ? input.url : String(input));
+  if (simulateConcluded && url.hostname === 'api.heigit.org') {
+    routeRequest = JSON.parse(String(init?.body));
+    return Promise.resolve(Response.json({ routes: [{ summary: { distance: 2500.1 } }] }));
+  }
   if (simulatePlaced && url.hostname === 'merchant-api.ifood.com.br') {
     calls.push(`${init?.method ?? 'GET'} ${url.pathname}`);
     if (url.pathname === '/authentication/v1.0/oauth/token') {
@@ -26,6 +34,18 @@ globalThis.fetch = (input, init) => {
   }
   if (url.hostname !== 'test.supabase.co') throw new Error('Unexpected network request');
   calls.push(`${init?.method ?? 'GET'} ${url.pathname}`);
+  if (simulateConcluded && url.pathname.endsWith('/orders') && init?.method === 'GET') {
+    return Promise.resolve(Response.json({
+      id: 'local-1', status: 'entregue', driver_id: 'driver-1',
+      ifood_order_id: 'order-1', subtotal: { total: {} },
+      latitude: -7.23, longitude: -35.87
+    }));
+  }
+  if (simulateConcluded && url.pathname.endsWith('/delivery_history')) {
+    if (init?.method === 'GET') return Promise.resolve(Response.json({ id: 'history-1', valor_entrega: null }));
+    if (init?.method === 'PATCH') savedEarnings = JSON.parse(String(init.body));
+    return Promise.resolve(new Response(null, { status: 201 }));
+  }
   if (simulatePlaced && url.pathname.endsWith('/orders')) {
     if (init?.method === 'GET') return Promise.resolve(Response.json(null));
     if (init?.method === 'POST') {
@@ -109,5 +129,27 @@ Deno.test('processes a signed PLACED event through the adapter', async () => {
     assert(calls.includes('POST /rest/v1/webhook_events'), 'The event must be recorded for deduplication');
   } finally {
     simulatePlaced = false;
+  }
+});
+
+Deno.test('calculates the driver payout for a concluded event in the Edge runtime', async () => {
+  calls = [];
+  duplicate = false;
+  simulateConcluded = true;
+  routeRequest = undefined;
+  savedEarnings = undefined;
+  try {
+    const body = JSON.stringify({ id: 'event-3', code: 'CONCLUDED', orderId: 'order-1' });
+    const response = await adaptWebhookRequest(request(body), handler);
+    assert(response.status === 202, 'The concluded event must be accepted');
+    assert(JSON.stringify(routeRequest) === JSON.stringify({
+      coordinates: [[-35.868339, -7.224483], [-35.87, -7.23]],
+      preference: 'shortest'
+    }), 'The shortest route must be requested');
+    assert(JSON.stringify(savedEarnings) === JSON.stringify({
+      valor_entrega: 6, route_distance_meters: 2500.1, route_error: null
+    }), 'The route payout must be saved');
+  } finally {
+    simulateConcluded = false;
   }
 });

@@ -91,6 +91,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Erro ao calcular saldo disponível' });
   }
 
+  if ((history || []).some(row => row.valor_entrega === null)) {
+    return res.status(409).json({ error: 'Há entregas com repasse pendente de cálculo. Procure o administrador.' });
+  }
+
   const availableRows = (history || []).filter((row) => !withdrawnIds.has(row.id));
   const totalValue = availableRows.reduce((sum, row) => sum + Number(row.valor_entrega), 0);
 

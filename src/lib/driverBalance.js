@@ -4,7 +4,7 @@ function sumCents(rows, field) {
 
 export function calculateDriverBalance(deliveries, withdrawals, adjustments) {
   return (
-    sumCents(deliveries, 'valor_entrega') -
+    sumCents(deliveries.filter(row => row.valor_entrega !== null), 'valor_entrega') -
     sumCents(withdrawals, 'valor') +
     sumCents(adjustments, 'amount')
   ) / 100;

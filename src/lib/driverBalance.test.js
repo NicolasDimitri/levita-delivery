@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateDriverBalance } from './driverBalance.js';
 
+test('entregas pendentes não entram no saldo até terem valor calculado', () => {
+  assert.equal(calculateDriverBalance([{ valor_entrega: '6.00' }, { valor_entrega: null }], [], []), 6);
+});
+
 test('saldo inclui créditos, descontos e pagamentos sem perder centavos', () => {
   assert.equal(calculateDriverBalance(
     [{ valor_entrega: '230.00' }],

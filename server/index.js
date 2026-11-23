@@ -19,6 +19,7 @@ import orderMetaHandler from '../api/ifood/order-meta.js';
 import storeHoursStatusHandler from '../api/ifood/store-hours-status.js';
 import toggleStoreHoursHandler from '../api/ifood/toggle-store-hours.js';
 import cleanupHandler from '../api/ifood/cleanup-webhook-events.js';
+import retryRouteEarningsHandler from '../api/driver/retry-route-earnings.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -59,6 +60,7 @@ app.get('/api/ifood/order-meta', adapt(orderMetaHandler));
 app.get('/api/ifood/store-hours-status', adapt(storeHoursStatusHandler));
 app.post('/api/ifood/toggle-store-hours', adapt(toggleStoreHoursHandler));
 app.post('/api/ifood/cleanup-webhook-events', adapt(cleanupHandler));
+app.post('/api/driver/retry-route-earnings', adapt(retryRouteEarningsHandler));
 
 app.listen(PORT, () => {
   console.log(`API local rodando em http://localhost:${PORT}`);
