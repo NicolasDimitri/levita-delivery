@@ -1,11 +1,12 @@
 // src/pages/AdminPage.jsx
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { TabBar, Button, EmptyState, Badge, ErrorMsg } from '../lib/ui';
+import { TabBar, Button, EmptyState, Badge, ErrorMsg, Sheet, CurrencyInput, Input, ToggleGroup } from '../lib/ui';
 import { fmtBRL } from '../lib/constants';
 import { ordersForActiveColumn } from '../lib/activeOrders';
+import { calculateDriverBalance } from '../lib/driverBalance';
 import OrderCard from '../components/OrderCard';
 import StoreStatusToggle from '../components/StoreStatusToggle';
 
@@ -29,6 +30,13 @@ export default function AdminPage() {
   const [finalOrders, setFinalOrders] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [driverBalances, setDriverBalances] = useState({});
+  const [driverAdjustments, setDriverAdjustments] = useState([]);
+  const [adjustmentDriver, setAdjustmentDriver] = useState(null);
+  const [adjustmentType, setAdjustmentType] = useState('credit');
+  const [adjustmentAmount, setAdjustmentAmount] = useState('');
+  const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [adjustmentError, setAdjustmentError] = useState('');
+  const [adjustmentSaving, setAdjustmentSaving] = useState(false);
   const [loadingWithdraw, setLoadingWithdraw] = useState(null);
   const [copiedPixDriver, setCopiedPixDriver] = useState(null);
   const [withdrawError, setWithdrawError] = useState('');
@@ -36,6 +44,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [ordersError, setOrdersError] = useState('');
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const balanceRequest = useRef(0);
 
   const loadOrders = useCallback(async () => {
     const { data, error } = await supabase
@@ -67,24 +76,31 @@ export default function AdminPage() {
 
   const loadDriverBalances = useCallback(async () => {
     if (!drivers.length) return;
+    const requestId = ++balanceRequest.current;
     const ids = drivers.map(d => d.id);
-    const [{ data: hist, error: historyError }, { data: wdr, error: withdrawalsError }] = await Promise.all([
+    const [{ data: hist, error: historyError }, { data: wdr, error: withdrawalsError }, { data: adjustments, error: adjustmentsError }] = await Promise.all([
       supabase.from('delivery_history').select('driver_id, valor_entrega').in('driver_id', ids),
       supabase.from('withdrawals').select('driver_id, valor').in('driver_id', ids),
+      supabase.from('driver_balance_adjustments').select('id, driver_id, amount, reason, created_at')
+        .in('driver_id', ids).order('created_at', { ascending: false }),
     ]);
-    if (historyError || withdrawalsError) {
-      console.error('Não foi possível carregar os saldos dos entregadores', historyError || withdrawalsError);
+    if (requestId !== balanceRequest.current) return;
+    if (historyError || withdrawalsError || adjustmentsError) {
+      console.error('Não foi possível carregar os saldos dos entregadores', historyError || withdrawalsError || adjustmentsError);
       setBalanceError('Não foi possível atualizar os saldos dos entregadores.');
       return;
     }
-    const earned = {};
-    const withdrawn = {};
-    (hist || []).forEach(r => { earned[r.driver_id] = (earned[r.driver_id] || 0) + Number(r.valor_entrega); });
-    (wdr || []).forEach(r => { withdrawn[r.driver_id] = (withdrawn[r.driver_id] || 0) + Number(r.valor); });
     const balances = {};
-    ids.forEach(id => { balances[id] = Math.max(0, (earned[id] || 0) - (withdrawn[id] || 0)); });
+    ids.forEach(id => {
+      balances[id] = calculateDriverBalance(
+        (hist || []).filter(row => row.driver_id === id),
+        (wdr || []).filter(row => row.driver_id === id),
+        (adjustments || []).filter(row => row.driver_id === id)
+      );
+    });
     setBalanceError('');
     setDriverBalances(balances);
+    setDriverAdjustments(adjustments || []);
   }, [drivers]);
 
   useEffect(() => { loadOrders(); loadDrivers(); }, [loadOrders, loadDrivers]);
@@ -110,6 +126,12 @@ export default function AdminPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_history' }, () => {
         if (tab === 'entregadores') loadDriverBalances();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_balance_adjustments' }, () => {
+        if (tab === 'entregadores') loadDriverBalances();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawals' }, () => {
+        if (tab === 'entregadores') loadDriverBalances();
+      })
       .subscribe((status, error) => {
         const connected = status === 'SUBSCRIBED';
         setRealtimeConnected(connected);
@@ -128,7 +150,7 @@ export default function AdminPage() {
 
   async function registerWithdrawal(driver) {
     const balance = driverBalances[driver.id] || 0;
-    if (balance <= 0) return;
+    if (balanceError || balance <= 0) return;
     setLoadingWithdraw(driver.id);
     setWithdrawError('');
     const { error } = await supabase.from('withdrawals').insert({
@@ -140,6 +162,50 @@ export default function AdminPage() {
     setLoadingWithdraw(null);
     if (error) { setWithdrawError(error.message); return; }
     await loadDriverBalances();
+  }
+
+  function openAdjustment(driver) {
+    setAdjustmentDriver(driver);
+    setAdjustmentType('credit');
+    setAdjustmentAmount('');
+    setAdjustmentReason('');
+    setAdjustmentError('');
+  }
+
+  async function saveAdjustment(event) {
+    event.preventDefault();
+    if (adjustmentSaving || !adjustmentDriver) return;
+    const amount = Number(adjustmentAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 99999999.99) {
+      setAdjustmentError('Informe um valor válido maior que zero.');
+      return;
+    }
+    if (!adjustmentReason.trim()) {
+      setAdjustmentError('Informe o motivo do ajuste.');
+      return;
+    }
+
+    setAdjustmentSaving(true);
+    setAdjustmentError('');
+    try {
+      const { error } = await supabase.from('driver_balance_adjustments').insert({
+        driver_id: adjustmentDriver.id,
+        amount: adjustmentType === 'debit' ? -amount : amount,
+        reason: adjustmentReason.trim(),
+        created_by: profile.id,
+      });
+      if (error) {
+        setAdjustmentError('Não foi possível confirmar o ajuste. Confira o histórico antes de tentar novamente: ' + error.message);
+        return;
+      }
+      setAdjustmentDriver(null);
+      await loadDriverBalances();
+    } catch (error) {
+      console.error('Não foi possível registrar o ajuste de saldo', error);
+      setAdjustmentError('Não foi possível registrar o ajuste. Confira o saldo antes de tentar novamente.');
+    } finally {
+      setAdjustmentSaving(false);
+    }
   }
 
   async function copyDriverPix(driver) {
@@ -233,7 +299,8 @@ export default function AdminPage() {
             <ErrorMsg message={balanceError} />
             {drivers.length === 0 && <EmptyState message="Nenhum entregador cadastrado." />}
             {drivers.map(driver => {
-              const balance = driverBalances[driver.id] ?? 0;
+              const balance = driverBalances[driver.id];
+              const adjustments = driverAdjustments.filter(item => item.driver_id === driver.id);
               const isPaying = loadingWithdraw === driver.id;
               return (
                 <div key={driver.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
@@ -243,16 +310,19 @@ export default function AdminPage() {
                       <p className="text-xs text-gray-400">{driver.phone || 'Sem telefone'}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs text-gray-400">Saldo a pagar</p>
-                      <p className={`text-lg font-bold ${balance > 0 ? 'text-green-700' : 'text-gray-400'}`}>
-                        R$ {fmtBRL(balance)}
+                      <p className="text-xs text-gray-400">Saldo</p>
+                      <p className={`text-lg font-bold ${balance < 0 ? 'text-red-700' : balance > 0 ? 'text-green-700' : 'text-gray-400'}`}>
+                        {balance === undefined ? '—' : `R$ ${fmtBRL(balance)}`}
                       </p>
                     </div>
                   </div>
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button variant="secondary" className="min-w-[130px] flex-1" onClick={() => openAdjustment(driver)}>
+                      Ajustar saldo
+                    </Button>
                     <Button
                       variant="secondary"
-                      className="flex-1"
+                      className="min-w-[130px] flex-1"
                       onClick={() => copyDriverPix(driver)}
                       disabled={!driver.pix_key}
                     >
@@ -261,9 +331,9 @@ export default function AdminPage() {
                     {balance > 0 && (
                       <Button
                         variant="success"
-                        className="flex-1"
+                        className="min-w-[130px] flex-1"
                         onClick={() => registerWithdrawal(driver)}
-                        disabled={isPaying}
+                        disabled={isPaying || Boolean(balanceError)}
                       >
                         {isPaying ? 'Registrando...' : `Marcar R$ ${fmtBRL(balance)} como pago`}
                       </Button>
@@ -272,12 +342,44 @@ export default function AdminPage() {
                   {balance === 0 && (
                     <p className="mt-2 text-center text-xs text-gray-400">Saldo zerado ✓</p>
                   )}
+                  {balance < 0 && (
+                    <p className="mt-2 text-center text-xs text-red-700">Saldo negativo será compensado por ganhos futuros.</p>
+                  )}
+                  {adjustments.length > 0 && (
+                    <details className="mt-3 text-sm text-gray-600">
+                      <summary className="cursor-pointer font-medium">Histórico de ajustes</summary>
+                      <ul className="mt-2 space-y-2">
+                        {adjustments.map(item => (
+                          <li key={item.id} className="flex justify-between gap-2">
+                            <span>{item.reason} <span className="text-xs text-gray-400">({new Date(item.created_at).toLocaleDateString('pt-BR')})</span></span>
+                            <span className="shrink-0">{Number(item.amount) > 0 ? '+' : '−'} R$ {fmtBRL(Math.abs(Number(item.amount)))}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </div>
               );
             })}
           </div>
         )}
       </div>
+      <Sheet open={Boolean(adjustmentDriver)} onClose={() => { if (!adjustmentSaving) setAdjustmentDriver(null); }}
+        title={`Ajustar saldo${adjustmentDriver ? ` — ${adjustmentDriver.name}` : ''}`}>
+        <form onSubmit={saveAdjustment} className="space-y-4">
+          <ToggleGroup value={adjustmentType} onChange={setAdjustmentType} options={[
+            { value: 'credit', label: 'Somar' },
+            { value: 'debit', label: 'Subtrair' },
+          ]} />
+          <CurrencyInput label="Valor do ajuste" required value={adjustmentAmount} onChange={setAdjustmentAmount} />
+          <Input label="Motivo" required maxLength={300} value={adjustmentReason}
+            onChange={event => setAdjustmentReason(event.target.value)} placeholder="Ex.: entrega refeita ou troco" />
+          <ErrorMsg message={adjustmentError} />
+          <Button type="submit" disabled={adjustmentSaving}>
+            {adjustmentSaving ? 'Salvando...' : 'Registrar ajuste'}
+          </Button>
+        </form>
+      </Sheet>
     </div>
   );
 }
