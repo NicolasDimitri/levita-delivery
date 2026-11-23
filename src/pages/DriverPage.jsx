@@ -34,6 +34,7 @@ export default function DriverPage() {
   const [withdrawals, setWithdrawals] = useState([]);
   const [adjustments, setAdjustments] = useState([]);
   const [balance, setBalance] = useState(null);
+  const [pendingEarningsCount, setPendingEarningsCount] = useState(0);
   const [totalWithdrawn, setTotalWithdrawn] = useState(0);
   const [loading, setLoading] = useState(true);
   const [withdrawNote, setWithdrawNote] = useState('');
@@ -115,6 +116,7 @@ export default function DriverPage() {
     setBalanceError('');
     setTotalWithdrawn(withdrawn);
     setAdjustments(adj || []);
+    setPendingEarningsCount((hist || []).filter(row => row.valor_entrega === null).length);
     setBalance(calculateDriverBalance(hist || [], wdr || [], adj || []));
   }, [session]);
 
@@ -435,6 +437,9 @@ export default function DriverPage() {
               <p className="mt-1 text-xs opacity-70">Total sacado: R$ {fmtBRL(totalWithdrawn)}</p>
               {balance < 0 && <p className="mt-1 text-xs">Saldo negativo será compensado por ganhos futuros.</p>}
               {balanceError && <p className="mt-2 text-sm text-white">{balanceError}</p>}
+              {pendingEarningsCount > 0 && (
+                <p className="mt-2 text-sm">{pendingEarningsCount} entrega(s) com repasse pendente de cálculo, ainda não incluído no saldo.</p>
+              )}
             </div>
 
             {/* instrução */}

@@ -7,6 +7,7 @@ import { TabBar, Button, EmptyState, Badge, ErrorMsg, Sheet, CurrencyInput, Inpu
 import { fmtBRL } from '../lib/constants';
 import { ordersForActiveColumn } from '../lib/activeOrders';
 import { calculateDriverBalance } from '../lib/driverBalance';
+import { useApi } from '../lib/useApi';
 import OrderCard from '../components/OrderCard';
 import StoreStatusToggle from '../components/StoreStatusToggle';
 
@@ -25,12 +26,16 @@ const TABS = [
 
 export default function AdminPage() {
   const { signOut, profile } = useAuth();
+  const { call } = useApi();
   const [tab, setTab] = useState('ativos');
   const [orders, setOrders] = useState([]);
   const [finalOrders, setFinalOrders] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [driverBalances, setDriverBalances] = useState({});
   const [driverAdjustments, setDriverAdjustments] = useState([]);
+  const [pendingEarnings, setPendingEarnings] = useState([]);
+  const [retryingEarnings, setRetryingEarnings] = useState(null);
+  const [retryError, setRetryError] = useState('');
   const [adjustmentDriver, setAdjustmentDriver] = useState(null);
   const [adjustmentType, setAdjustmentType] = useState('credit');
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
@@ -79,7 +84,7 @@ export default function AdminPage() {
     const requestId = ++balanceRequest.current;
     const ids = drivers.map(d => d.id);
     const [{ data: hist, error: historyError }, { data: wdr, error: withdrawalsError }, { data: adjustments, error: adjustmentsError }] = await Promise.all([
-      supabase.from('delivery_history').select('driver_id, valor_entrega').in('driver_id', ids),
+      supabase.from('delivery_history').select('id, driver_id, order_id, valor_entrega, route_error, orders(display_id)').in('driver_id', ids),
       supabase.from('withdrawals').select('driver_id, valor').in('driver_id', ids),
       supabase.from('driver_balance_adjustments').select('id, driver_id, amount, reason, created_at')
         .in('driver_id', ids).order('created_at', { ascending: false }),
@@ -101,6 +106,7 @@ export default function AdminPage() {
     setBalanceError('');
     setDriverBalances(balances);
     setDriverAdjustments(adjustments || []);
+    setPendingEarnings((hist || []).filter(row => row.valor_entrega === null));
   }, [drivers]);
 
   useEffect(() => { loadOrders(); loadDrivers(); }, [loadOrders, loadDrivers]);
@@ -162,6 +168,19 @@ export default function AdminPage() {
     setLoadingWithdraw(null);
     if (error) { setWithdrawError(error.message); return; }
     await loadDriverBalances();
+  }
+
+  async function retryEarnings(item) {
+    setRetryingEarnings(item.id);
+    setRetryError('');
+    try {
+      await call('/api/driver/retry-route-earnings', { body: { orderId: item.order_id } });
+    } catch (error) {
+      setRetryError(`Pedido ${item.orders?.display_id || item.order_id}: ${error.message}`);
+    } finally {
+      await loadDriverBalances();
+      setRetryingEarnings(null);
+    }
   }
 
   function openAdjustment(driver) {
@@ -297,10 +316,12 @@ export default function AdminPage() {
           <div className="max-w-lg space-y-3">
             <ErrorMsg message={withdrawError} />
             <ErrorMsg message={balanceError} />
+            <ErrorMsg message={retryError} />
             {drivers.length === 0 && <EmptyState message="Nenhum entregador cadastrado." />}
             {drivers.map(driver => {
               const balance = driverBalances[driver.id];
               const adjustments = driverAdjustments.filter(item => item.driver_id === driver.id);
+              const pending = pendingEarnings.filter(item => item.driver_id === driver.id);
               const isPaying = loadingWithdraw === driver.id;
               return (
                 <div key={driver.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
@@ -316,6 +337,19 @@ export default function AdminPage() {
                       </p>
                     </div>
                   </div>
+                  {pending.length > 0 && (
+                    <div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+                      <p>{pending.length} repasse(s) pendente(s) não incluído(s) no saldo.</p>
+                      {pending.map(item => (
+                        <div key={item.id} className="mt-2">
+                          <p>Pedido {item.orders?.display_id || item.order_id}: {item.route_error || 'cálculo pendente'}</p>
+                          <Button variant="secondary" onClick={() => retryEarnings(item)} disabled={Boolean(retryingEarnings)}>
+                            {retryingEarnings === item.id ? 'Calculando...' : 'Tentar calcular novamente'}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button variant="secondary" className="min-w-[130px] flex-1" onClick={() => openAdjustment(driver)}>
                       Ajustar saldo

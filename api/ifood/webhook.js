@@ -10,7 +10,7 @@ import { Buffer } from 'node:buffer';
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { getOrderDetails, classifyPayment } from '../../lib/ifood.js';
 import { getDeliveryCoordinates } from '../../lib/deliveryAddress.js';
-import { DRIVER_EARNING_PER_DELIVERY } from '../../lib/driverEarnings.js';
+import { recordDriverEarnings } from '../../lib/driverRouteEarnings.js';
 
 export const config = {
   api: { bodyParser: false }
@@ -456,7 +456,7 @@ async function handlePlaced(event) {
 async function handleConcluded(event) {
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .select('id, status, driver_id, ifood_order_id, subtotal')
+    .select('id, status, driver_id, ifood_order_id, subtotal, latitude, longitude')
     .eq('ifood_order_id', event.orderId)
     .maybeSingle();
   if (orderError) throw orderError;
@@ -505,34 +505,7 @@ async function handleConcluded(event) {
   });
 
   if (order.driver_id) {
-    const { data: history, error: historyLookupError } = await supabaseAdmin
-      .from('delivery_history')
-      .select('id')
-      .eq('order_id', order.id)
-      .limit(1)
-      .maybeSingle();
-    if (historyLookupError) throw historyLookupError;
-
-    if (!history) {
-      const { error: historyInsertError } = await supabaseAdmin.from('delivery_history').insert({
-        driver_id: order.driver_id,
-        order_id: order.id,
-        valor_entrega: DRIVER_EARNING_PER_DELIVERY
-      });
-      if (historyInsertError) throw historyInsertError;
-      console.log('=== [WEBHOOK] histórico de entrega criado ===', {
-        eventId: event.id,
-        orderId: event.orderId,
-        localOrderId: order.id,
-        driverId: order.driver_id
-      });
-    } else {
-      console.log('=== [WEBHOOK] histórico de entrega já existia ===', {
-        eventId: event.id,
-        orderId: event.orderId,
-        localOrderId: order.id
-      });
-    }
+    await recordDriverEarnings(supabaseAdmin, order);
   }
 }
 
