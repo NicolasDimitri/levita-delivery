@@ -262,7 +262,7 @@ export default function AdminPage() {
               <StoreStatusToggle />
               <Link to="/estoque" className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Estoque</Link>
               <Link to="/financeiro" className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Financeiro</Link>
-              <Link to="/homologacao-ifood" className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-800 hover:bg-orange-100">Homologação iFood</Link>
+              <Link to="/homologacao-ifood" className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-800 hover:bg-orange-100">Gestão da loja</Link>
               <Button variant="ghost" onClick={signOut}>Sair</Button>
             </div>
           </div>

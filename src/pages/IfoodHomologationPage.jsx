@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { useAuth } from '../context/AuthContext';
+import { Badge, Button, Card, EmptyState } from '../lib/ui';
 
 const API_PATH = '/api/ifood/store-hours-status';
-const DAYS = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+const DAY_LABELS = {
+  SUNDAY: 'Domingo',
+  MONDAY: 'Segunda-feira',
+  TUESDAY: 'Terça-feira',
+  WEDNESDAY: 'Quarta-feira',
+  THURSDAY: 'Quinta-feira',
+  FRIDAY: 'Sexta-feira',
+  SATURDAY: 'Sábado'
+};
 
 function getList(value, key) {
   if (Array.isArray(value)) return value;
@@ -34,6 +44,25 @@ function parsePrice(value) {
   const price = Number(String(value).replace(',', '.'));
   if (!Number.isFinite(price) || price < 0) throw new Error('Informe um preço válido.');
   return price;
+}
+
+function formatShift(shift) {
+  const [hours, minutes] = String(shift.start || '00:00').split(':').map(Number);
+  const start = hours * 60 + minutes;
+  const end = (start + Number(shift.duration || 0)) % (24 * 60);
+  const format = (total) => `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  return `${format(start)}–${format(end)}`;
+}
+
+function getAvailability(value, merchant) {
+  const raw = typeof value === 'string'
+    ? value
+    : value?.status || value?.availability || value?.state || merchant?.status;
+  if (value?.available === true || raw === 'AVAILABLE' || raw === 'OPEN') return { label: 'Disponível', color: 'green' };
+  if (value?.available === false || raw === 'UNAVAILABLE' || raw === 'CLOSED' || raw === 'DISABLED') {
+    return { label: 'Indisponível', color: 'red' };
+  }
+  return { label: value ? 'Consultado' : 'Não consultado', color: value ? 'blue' : 'gray' };
 }
 
 async function fileToDataUrl(file) {
@@ -67,7 +96,7 @@ function Field({ label, value, onChange, type = 'text', ...props }) {
     <label className="block text-sm font-medium text-gray-700">
       {label}
       <input
-        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+        className="mt-1 w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm focus:border-brand-500 focus:outline-none"
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -79,18 +108,15 @@ function Field({ label, value, onChange, type = 'text', ...props }) {
 
 function ActionButton({ children, onClick, disabled = false, secondary = false, type = 'button' }) {
   return (
-    <button
+    <Button
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
-        secondary
-          ? 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-          : 'bg-orange-600 text-white hover:bg-orange-700'
-      }`}
+      variant={secondary ? 'secondary' : 'primary'}
+      className="rounded-xl"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -107,14 +133,15 @@ function JsonPanel({ title, value }) {
 
 function Panel({ title, children }) {
   return (
-    <section className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+    <Card className="space-y-4 p-5">
       <h2 className="font-bold text-gray-800">{title}</h2>
       {children}
-    </section>
+    </Card>
   );
 }
 
 export default function IfoodHomologationPage() {
+  const { profile, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState('merchant');
   const [merchants, setMerchants] = useState([]);
   const [authorizedMerchantIds, setAuthorizedMerchantIds] = useState([]);
@@ -126,16 +153,18 @@ export default function IfoodHomologationPage() {
   const [categories, setCategories] = useState([]);
   const [categoryId, setCategoryId] = useState('');
   const [categoryName, setCategoryName] = useState('Teste Homologação');
-  const [storeName, setStoreName] = useState('');
   const [storeError, setStoreError] = useState('');
   const [catalogError, setCatalogError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const [pauseDescription, setPauseDescription] = useState('Pausa de teste de homologação');
+  const [loadingMerchants, setLoadingMerchants] = useState(false);
+  const [loadingStore, setLoadingStore] = useState(false);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
+  const [pauseDescription, setPauseDescription] = useState('Interrupção temporária');
   const [itemName, setItemName] = useState('Produto Teste');
   const [itemPrice, setItemPrice] = useState('19,90');
-  const [groupName, setGroupName] = useState('Complementos de teste');
-  const [optionNames, setOptionNames] = useState(['Complemento 1', 'Complemento 2']);
+  const [groupName, setGroupName] = useState('Complementos');
+  const [optionNames, setOptionNames] = useState(['Adicional de queijo', 'Bebida 350 ml']);
   const [optionPrices, setOptionPrices] = useState(['2,00', '3,00']);
   const [itemImage, setItemImage] = useState(null);
   const [optionImages, setOptionImages] = useState([null, null]);
@@ -176,6 +205,7 @@ export default function IfoodHomologationPage() {
   }
 
   async function loadMerchants() {
+    setLoadingMerchants(true);
     setStoreError('');
     try {
       const result = await callApi('merchants');
@@ -189,6 +219,8 @@ export default function IfoodHomologationPage() {
       else if (allowedIds.length !== 1) setStoreError('A homologação exige exatamente 1 merchantId de teste em IFOOD_MERCHANT_IDS.');
     } catch (error) {
       setStoreError(error.message);
+    } finally {
+      setLoadingMerchants(false);
     }
   }
 
@@ -202,6 +234,7 @@ export default function IfoodHomologationPage() {
       setInterruptions([]);
       return;
     }
+    setLoadingStore(true);
     setStoreError('');
     const results = await Promise.allSettled([
       callApi('details', { merchantId }),
@@ -215,6 +248,7 @@ export default function IfoodHomologationPage() {
     setInterruptions(results[3].status === 'fulfilled' ? interruptionList(results[3].value) : []);
     const errors = results.filter((result) => result.status === 'rejected').map((result) => result.reason.message);
     setStoreError(errors.join(' '));
+    setLoadingStore(false);
   }
 
   async function loadCategories() {
@@ -225,6 +259,7 @@ export default function IfoodHomologationPage() {
       setCurrentItem(null);
       return;
     }
+    setLoadingCatalog(true);
     setCatalogError('');
     try {
       const result = await callApi('categories', { merchantId });
@@ -234,6 +269,8 @@ export default function IfoodHomologationPage() {
       setCategoryId((current) => categoryIds.includes(current) ? current : categoryIds[0] || '');
     } catch (error) {
       setCatalogError(error.message);
+    } finally {
+      setLoadingCatalog(false);
     }
   }
 
@@ -309,7 +346,7 @@ export default function IfoodHomologationPage() {
       { dayOfWeek: 'SUNDAY', start: '13:00:00', duration: 180 },
       { dayOfWeek: 'SUNDAY', start: '17:00:00', duration: 360 }
     ];
-    await perform('set-hours', { shifts }, 'Horários do checklist enviados ao iFood.', loadStore);
+    await perform('set-hours', { shifts }, 'Horários de funcionamento atualizados no iFood.', loadStore);
   }
 
   async function uploadImage(file) {
@@ -510,119 +547,275 @@ export default function IfoodHomologationPage() {
   }
 
   const activeInterruptions = interruptions.filter((interruption) => {
+    const start = new Date(interruption.start).getTime();
     const end = new Date(interruption.end).getTime();
-    return Number.isFinite(end) && end > Date.now();
+    return Number.isFinite(start) && Number.isFinite(end) && start <= Date.now() && end > Date.now();
   });
+  const availability = getAvailability(status, details || selectedMerchant);
+  const hoursByDay = hours.reduce((grouped, shift) => {
+    const shiftsForDay = grouped[shift.dayOfWeek] || [];
+    return { ...grouped, [shift.dayOfWeek]: [...shiftsForDay, shift] };
+  }, {});
+  const catalogItemCount = categories.reduce((count, category) => count + getList(category, 'items').length, 0);
+
+  const formatDateTime = (value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value || '—';
+    return new Intl.DateTimeFormat('pt-BR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+      timeZone: 'America/Sao_Paulo'
+    }).format(date);
+  };
 
   return (
     <main className="min-h-screen bg-gray-50 pb-12">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
-          <div>
-            <Link to="/admin" className="text-sm text-orange-700 hover:underline">← Voltar ao painel</Link>
-            <h1 className="mt-1 text-xl font-bold text-gray-900">Homologação iFood</h1>
-            <p className="text-sm text-gray-500">Execute os cenários do checklist em uma loja do aplicativo de teste.</p>
+      <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 shadow-sm backdrop-blur">
+        <div className="mx-auto max-w-7xl px-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+                <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" aria-hidden="true">
+                  <path d="M3.5 9.5h17l-1.6-5h-13l-2.4 5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                  <path d="M5 9.5v10h14v-10M9 19.5v-6h6v6M3.5 9.5a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="truncate font-bold text-gray-900">Levita Delivery</p>
+                  <Badge color="amber">AMBIENTE DE TESTE</Badge>
+                </div>
+                <p className="truncate text-xs text-gray-500">Gestão de lojas e cardápio · iFood</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="hidden text-sm text-gray-500 sm:inline">{profile?.name}</span>
+              <Link to="/admin" className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
+                Pedidos
+              </Link>
+              <Button variant="ghost" onClick={signOut}>Sair</Button>
+            </div>
           </div>
-          <label className="min-w-64 text-sm font-medium text-gray-700">
-            Loja de teste
-            <select
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
-              value={merchantId}
-              onChange={(event) => setMerchantId(event.target.value)}
-            >
-              <option value="">Selecione uma loja</option>
-              {merchants.map((merchant) => {
-                const id = getMerchantId(merchant);
-                return <option key={id} value={id}>{merchant.name || id} — {id}</option>;
-              })}
-            </select>
-          </label>
+
+          <div className="flex flex-wrap items-end justify-between gap-4 border-t border-gray-100 py-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Operações</p>
+              <h1 className="text-lg font-bold text-gray-900">Gestão da loja</h1>
+            </div>
+            <label className="w-full max-w-sm text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Loja vinculada
+              <select
+                className="mt-1 w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-2.5 text-sm font-medium normal-case text-gray-800 focus:border-brand-500 focus:outline-none"
+                value={merchantId}
+                onChange={(event) => setMerchantId(event.target.value)}
+                disabled={loadingMerchants}
+              >
+                <option value="">{loadingMerchants ? 'Carregando lojas…' : 'Selecione uma loja'}</option>
+                {merchants.map((merchant) => {
+                  const id = getMerchantId(merchant);
+                  return <option key={id} value={id}>{merchant.name || id} · {id}</option>;
+                })}
+              </select>
+            </label>
+          </div>
+
+          <div className="flex gap-5">
+            {[
+              ['merchant', 'Minha loja'],
+              ['catalog', 'Cardápio']
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`border-b-2 px-1 pb-3 text-sm font-semibold transition ${
+                  activeTab === id
+                    ? 'border-brand-500 text-brand-600'
+                    : 'border-transparent text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl space-y-5 px-4 py-5">
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          Use somente credenciais e lojas de teste. Horários, pausas, categorias, itens, preços e disponibilidade são enviados ao iFood e alteram a loja selecionada.
+      <div className="mx-auto max-w-7xl space-y-5 px-4 py-5">
+        <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <span className="mt-0.5 text-amber-600" aria-hidden="true">●</span>
+          <div>
+            <p className="text-sm font-bold text-amber-900">Ambiente de desenvolvimento conectado</p>
+            <p className="mt-1 text-sm text-amber-800">
+              As consultas e alterações desta tela são feitas na loja de teste vinculada a este ambiente. Não use dados de produção aqui.
+            </p>
+          </div>
         </div>
-        <p className="text-sm text-gray-600">
-          Para abrir o chamado, grave cada cenário separadamente e anote a data/hora e o client_id do app de teste. Os logs HTTP Requests são baixados no Developer Portal e anexados ao chamado.
-        </p>
+
+        {notice && <p role="status" className="rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-800">{notice}</p>}
         {!isAuthorizedMerchant && merchantId && (
-          <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
-            A homologação só pode ser executada com o único merchantId de teste configurado em IFOOD_MERCHANT_IDS.
+          <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            Esta tela requer exatamente um merchantId de teste em IFOOD_MERCHANT_IDS.
           </p>
         )}
-        {notice && <p className="rounded-xl bg-green-50 p-3 text-sm text-green-800">{notice}</p>}
-        <div className="flex gap-2">
-          {[
-            ['merchant', 'Merchant'],
-            ['catalog', 'Catalog']
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold ${activeTab === id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}
-            >
-              {label}
-            </button>
-          ))}
-          <ActionButton secondary onClick={activeTab === 'merchant' ? loadStore : loadCategories} disabled={!merchantId || busy}>
-            Atualizar dados
-          </ActionButton>
-          <ActionButton secondary onClick={loadMerchants} disabled={busy}>Listar lojas</ActionButton>
-        </div>
 
         {activeTab === 'merchant' ? (
           <div className="space-y-5">
-            {storeError && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{storeError}</p>}
-            <Panel title="Cenário 1 — Informações da Loja">
-              <p className="text-sm text-gray-600">Loja selecionada: <strong>{selectedMerchant?.name || merchantId || '—'}</strong></p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <JsonPanel title="Detalhes completos" value={details} />
-                <JsonPanel title="Disponibilidade" value={status} />
+            {storeError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{storeError}</p>}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Card className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Disponibilidade</p>
+                <div className="mt-2"><Badge color={availability.color}>{loadingStore ? 'Consultando…' : availability.label}</Badge></div>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Interrupções ativas</p>
+                <p className="mt-2 text-xl font-bold text-gray-900">{loadingStore ? '—' : activeInterruptions.length}</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Categorias no cardápio</p>
+                <p className="mt-2 text-xl font-bold text-gray-900">{loadingCatalog ? '—' : categories.length}</p>
+              </Card>
+            </div>
+
+            <Panel title="Informações da loja">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">{details?.name || selectedMerchant?.name || 'Loja vinculada'}</h2>
+                  <p className="mt-1 text-sm text-gray-500">ID da loja: <span className="font-mono text-xs">{merchantId || '—'}</span></p>
+                  {details?.address && (
+                    <p className="mt-2 text-sm text-gray-600">
+                      {[details.address.street, details.address.number, details.address.city, details.address.state].filter(Boolean).join(', ')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <ActionButton secondary onClick={() => { loadStore(); loadCategories(); }} disabled={!merchantId || busy || loadingStore || loadingCatalog}>
+                    {loadingStore || loadingCatalog ? 'Atualizando…' : 'Atualizar informações'}
+                  </ActionButton>
+                </div>
               </div>
+              {loadingStore ? (
+                <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">Consultando informações diretamente no iFood…</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <JsonPanel title="Dados comerciais retornados pelo iFood" value={details} />
+                  <JsonPanel title="Disponibilidade retornada pelo iFood" value={status} />
+                </div>
+              )}
             </Panel>
 
-            <Panel title="Cenário 2 — Interrupção na Loja">
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                <Field label="Descrição da pausa" value={pauseDescription} onChange={setPauseDescription} />
-                <div className="self-end"><ActionButton onClick={createInterruption} disabled={!isAuthorizedMerchant || busy}>Cadastrar pausa de 24h</ActionButton></div>
-              </div>
-              <p className="text-sm text-gray-600">Pausas ativas: {activeInterruptions.length}</p>
-              {interruptions.length === 0
-                ? <p className="text-sm text-gray-500">Nenhuma pausa retornada pela API.</p>
-                : <div className="space-y-2">
-                  {interruptions.map((interruption) => (
-                    <div key={interruption.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 p-3 text-sm">
-                      <span>{interruption.description || 'Pausa'} · {interruption.start} — {interruption.end}</span>
-                      {interruption.id && <ActionButton secondary onClick={() => removeInterruption(interruption.id)} disabled={!isAuthorizedMerchant || busy}>Remover pausa</ActionButton>}
+            <Panel title="Funcionamento e interrupções">
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Horário de funcionamento</h3>
+                    <p className="mt-1 text-sm text-gray-500">A configuração atual da loja, organizada por dia da semana.</p>
+                  </div>
+                  {loadingStore ? <p className="text-sm text-gray-500">Carregando horários…</p> : hours.length === 0 ? (
+                    <EmptyState message="Nenhum horário retornado para esta loja." />
+                  ) : (
+                    <div className="divide-y divide-gray-100 rounded-xl border border-gray-100">
+                      {['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'].map((day) => {
+                        const shifts = hoursByDay[day] || [];
+                        return (
+                          <div key={day} className="flex items-start justify-between gap-3 px-4 py-3 text-sm">
+                            <span className="font-medium text-gray-700">{DAY_LABELS[day]}</span>
+                            <span className="text-right text-gray-500">{shifts.length ? shifts.map(formatShift).join(', ') : 'Fechado'}</span>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>}
-            </Panel>
+                  )}
+                  <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
+                    <p className="font-semibold text-gray-700">Atualização de fim de semana</p>
+                    <p className="mt-1">Sáb. 10:00–19:00 · Dom. 09:00–12:00, 13:00–16:00 e 17:00–23:00</p>
+                    <p className="mt-1 text-xs text-gray-500">Os horários dos outros dias são preservados.</p>
+                  </div>
+                  <ActionButton onClick={applyChecklistHours} disabled={!isAuthorizedMerchant || busy || loadingStore}>
+                    Aplicar horários de funcionamento
+                  </ActionButton>
+                </div>
 
-            <Panel title="Cenário 3 — Horário de Funcionamento">
-              <p className="text-sm text-gray-600">O envio preserva os demais dias configurados e substitui somente sábado e domingo pelos horários do checklist.</p>
-              <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
-                <p><strong>Sábado:</strong> 10:00–19:00</p>
-                <p><strong>Domingo:</strong> 09:00–12:00, 13:00–16:00 e 17:00–23:00</p>
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Interrupções</h3>
+                    <p className="mt-1 text-sm text-gray-500">Gerencie pausas temporárias e confira o retorno do iFood.</p>
+                  </div>
+                  <Field label="Descrição da interrupção" value={pauseDescription} onChange={setPauseDescription} />
+                  <ActionButton onClick={createInterruption} disabled={!isAuthorizedMerchant || busy}>
+                    {busy ? 'Enviando…' : 'Adicionar interrupção por 24 horas'}
+                  </ActionButton>
+                  {loadingStore ? <p className="text-sm text-gray-500">Carregando interrupções…</p> : interruptions.length === 0 ? (
+                    <EmptyState message="Nenhuma interrupção cadastrada." />
+                  ) : (
+                    <div className="space-y-2">
+                      {interruptions.map((interruption) => {
+                        const active = activeInterruptions.some((entry) => entry.id === interruption.id);
+                        return (
+                          <div key={interruption.id || `${interruption.start}-${interruption.end}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 p-4">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold text-gray-800">{interruption.description || 'Interrupção'}</p>
+                                <Badge color={active ? 'amber' : 'gray'}>{active ? 'Ativa' : 'Programada/encerrada'}</Badge>
+                              </div>
+                              <p className="mt-1 text-xs text-gray-500">{formatDateTime(interruption.start)} – {formatDateTime(interruption.end)}</p>
+                            </div>
+                            {interruption.id && (
+                              <ActionButton secondary onClick={() => removeInterruption(interruption.id)} disabled={!isAuthorizedMerchant || busy}>
+                                Remover
+                              </ActionButton>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
-              <ActionButton onClick={applyChecklistHours} disabled={!isAuthorizedMerchant || busy}>Cadastrar horários do checklist</ActionButton>
-              <JsonPanel title="Horários consultados" value={hours} />
             </Panel>
           </div>
         ) : (
           <div className="space-y-5">
-            {catalogError && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{catalogError}</p>}
-            <Panel title="Cenário 1 — Categoria e Item">
+            {catalogError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{catalogError}</p>}
+            <Panel title="Categorias do cardápio">
+              <p className="text-sm text-gray-500">Categorias atualmente vinculadas à loja.</p>
               <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                <Field label="Nome da categoria" value={categoryName} onChange={setCategoryName} />
-                <div className="self-end"><ActionButton onClick={createCategory} disabled={!isAuthorizedMerchant || busy}>Criar categoria</ActionButton></div>
+                <Field label="Nova categoria" value={categoryName} onChange={setCategoryName} />
+                <div className="self-end"><ActionButton onClick={createCategory} disabled={!isAuthorizedMerchant || busy}>Adicionar categoria</ActionButton></div>
               </div>
+              {loadingCatalog ? <p className="text-sm text-gray-500">Carregando cardápio…</p> : categories.length === 0 ? (
+                <EmptyState message="Nenhuma categoria retornada para esta loja." />
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {categories.map((category) => {
+                    const id = category.id || category.categoryId;
+                    const items = getList(category, 'items');
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => setCategoryId(id)}
+                        className={`rounded-xl border-2 p-4 text-left transition ${categoryId === id ? 'border-brand-300 bg-brand-50' : 'border-gray-100 bg-white hover:border-gray-200'}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-gray-800">{category.name || 'Categoria sem nome'}</p>
+                            <p className="mt-1 text-xs text-gray-500">{items.length} {items.length === 1 ? 'item' : 'itens'}</p>
+                          </div>
+                          <Badge color={category.status === 'AVAILABLE' ? 'green' : 'gray'}>{category.status || '—'}</Badge>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <JsonPanel title="Dados completos das categorias" value={categories} />
+            </Panel>
+
+            <Panel title="Cadastrar produto e complementos">
+              <p className="text-sm text-gray-500">O produto, o grupo de complementos e suas opções são enviados ao cardápio da loja selecionada.</p>
               <label className="block text-sm font-medium text-gray-700">
-                Categoria do item
-                <select className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2" value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-                  <option value="">Selecione</option>
+                Categoria
+                <select className="mt-1 w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm focus:border-brand-500 focus:outline-none" value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+                  <option value="">Selecione uma categoria</option>
                   {categories.map((category) => {
                     const id = category.id || category.categoryId;
                     return <option key={id} value={id}>{category.name || id}</option>;
@@ -630,60 +823,67 @@ export default function IfoodHomologationPage() {
                 </select>
               </label>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Nome do item" value={itemName} onChange={setItemName} />
+                <Field label="Nome do produto" value={itemName} onChange={setItemName} />
                 <Field label="Preço (R$)" value={itemPrice} onChange={setItemPrice} inputMode="decimal" />
               </div>
-              <label className="block text-sm text-gray-700">Foto do item (JPG/PNG)
-                <input className="mt-1 block w-full text-sm" type="file" accept="image/jpeg,image/png" onChange={(event) => setItemImage(event.target.files?.[0] || null)} />
+              <label className="block text-sm font-medium text-gray-700">Imagem do produto
+                <input className="mt-1 block w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:font-semibold file:text-brand-700" type="file" accept="image/jpeg,image/png" onChange={(event) => setItemImage(event.target.files?.[0] || null)} />
               </label>
-              <ActionButton onClick={createCatalogItem} disabled={!isAuthorizedMerchant || busy}>Criar item ativo</ActionButton>
-            </Panel>
 
-            <Panel title="Cenário 2 — Grupo e Complementos">
-              <Field label="Nome do grupo" value={groupName} onChange={setGroupName} />
-              {[0, 1].map((index) => (
-                <div key={index} className="grid gap-3 rounded-xl bg-gray-50 p-3 sm:grid-cols-3">
-                  <Field label={`Nome do complemento ${index + 1}`} value={optionNames[index]} onChange={(value) => setOptionNames((current) => current.map((name, i) => i === index ? value : name))} />
-                  <Field label="Preço (R$)" value={optionPrices[index]} onChange={(value) => setOptionPrices((current) => current.map((price, i) => i === index ? value : price))} inputMode="decimal" />
-                  <label className="block text-sm text-gray-700">Foto (JPG/PNG)
-                    <input className="mt-1 block w-full text-xs" type="file" accept="image/jpeg,image/png" onChange={(event) => setOptionImages((current) => current.map((file, i) => i === index ? event.target.files?.[0] || null : file))} />
-                  </label>
+              <div className="border-t border-gray-100 pt-4">
+                <div className="mb-3">
+                  <h3 className="font-semibold text-gray-800">Grupo de complementos</h3>
+                  <p className="mt-1 text-sm text-gray-500">Adicione duas opções ao grupo.</p>
                 </div>
-              ))}
-              <p className="text-sm text-gray-500">Os dois complementos são criados junto com o item usando um grupo de opções.</p>
+                <Field label="Nome do grupo" value={groupName} onChange={setGroupName} />
+                <div className="mt-3 space-y-3">
+                  {[0, 1].map((index) => (
+                    <div key={index} className="grid gap-3 rounded-xl bg-gray-50 p-4 sm:grid-cols-3">
+                      <Field label={`Complemento ${index + 1}`} value={optionNames[index]} onChange={(value) => setOptionNames((current) => current.map((name, i) => i === index ? value : name))} />
+                      <Field label="Preço (R$)" value={optionPrices[index]} onChange={(value) => setOptionPrices((current) => current.map((price, i) => i === index ? value : price))} inputMode="decimal" />
+                      <label className="block text-sm font-medium text-gray-700">Imagem
+                        <input className="mt-1 block w-full rounded-xl border border-gray-200 bg-white p-2.5 text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-brand-50 file:px-2 file:py-1.5 file:font-semibold file:text-brand-700" type="file" accept="image/jpeg,image/png" onChange={(event) => setOptionImages((current) => current.map((file, i) => i === index ? event.target.files?.[0] || null : file))} />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <ActionButton onClick={createCatalogItem} disabled={!isAuthorizedMerchant || busy || loadingCatalog}>
+                {busy ? 'Salvando no iFood…' : 'Salvar produto no cardápio'}
+              </ActionButton>
             </Panel>
 
             {currentItem && (
               <>
-                <Panel title="Cenário 3 — Alteração de Item e Complementos">
-                  <p className="text-sm text-gray-600">Item de teste: {currentItem.item.id}. Renomear e trocar fotos usa PUT /items; preços e disponibilidade usam os endpoints PATCH solicitados pelo suporte.</p>
-                  <Field label="Novo nome do item" value={editItemName} onChange={setEditItemName} />
-                  <label className="block text-sm text-gray-700">Nova foto do item
-                    <input className="mt-1 block w-full text-sm" type="file" accept="image/jpeg,image/png" onChange={(event) => setEditItemImage(event.target.files?.[0] || null)} />
+                <Panel title={`Editar produto · ${editItemName || 'Produto selecionado'}`}>
+                  <p className="text-sm text-gray-500">Atualize as informações comerciais e as imagens do produto e dos complementos.</p>
+                  <Field label="Nome do produto" value={editItemName} onChange={setEditItemName} />
+                  <label className="block text-sm font-medium text-gray-700">Nova imagem do produto
+                    <input className="mt-1 block w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:font-semibold file:text-brand-700" type="file" accept="image/jpeg,image/png" onChange={(event) => setEditItemImage(event.target.files?.[0] || null)} />
                   </label>
                   {[0, 1].map((index) => (
-                    <div key={index} className="grid gap-3 rounded-xl bg-gray-50 p-3 sm:grid-cols-2">
-                      <Field label={`Novo nome do complemento ${index + 1}`} value={editOptionNames[index]} onChange={(value) => setEditOptionNames((current) => current.map((name, i) => i === index ? value : name))} />
-                      <label className="block text-sm text-gray-700">Nova foto
-                        <input className="mt-1 block w-full text-sm" type="file" accept="image/jpeg,image/png" onChange={(event) => setEditOptionImages((current) => current.map((file, i) => i === index ? event.target.files?.[0] || null : file))} />
+                    <div key={index} className="grid gap-3 rounded-xl bg-gray-50 p-4 sm:grid-cols-2">
+                      <Field label={`Nome do complemento ${index + 1}`} value={editOptionNames[index]} onChange={(value) => setEditOptionNames((current) => current.map((name, i) => i === index ? value : name))} />
+                      <label className="block text-sm font-medium text-gray-700">Nova imagem
+                        <input className="mt-1 block w-full rounded-xl border border-gray-200 bg-white p-2.5 text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-brand-50 file:px-2 file:py-1.5 file:font-semibold file:text-brand-700" type="file" accept="image/jpeg,image/png" onChange={(event) => setEditOptionImages((current) => current.map((file, i) => i === index ? event.target.files?.[0] || null : file))} />
                       </label>
                     </div>
                   ))}
-                  <ActionButton onClick={saveItemNamesAndImages} disabled={busy}>Salvar nomes e fotos (PUT /items)</ActionButton>
+                  <ActionButton onClick={saveItemNamesAndImages} disabled={busy}>Salvar alterações</ActionButton>
                   {batchItems.length < 2 && (
                     <ActionButton secondary onClick={createBatchItem} disabled={busy}>
-                      Criar item extra para demonstrar lote
+                      Adicionar outro produto
                     </ActionButton>
                   )}
-                  <JsonPanel title="Payload atual do item" value={currentItem} />
+                  <JsonPanel title="Identificadores técnicos do produto" value={currentItem} />
                 </Panel>
 
-                <Panel title="Atualizações de preço em lote (PATCH)">
-                  <p className="text-sm text-gray-600">Itens no lote: {batchItems.length}. O segundo item é opcional; crie-o para mostrar vários itens em uma chamada.</p>
+                <Panel title="Preços e disponibilidade">
+                  <p className="text-sm text-gray-500">As alterações de preço e status são enviadas pelos endpoints PATCH do iFood.</p>
                   <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                    <Field label="Preço a aplicar aos itens selecionados (R$)" value={updatedItemPrice} onChange={setUpdatedItemPrice} inputMode="decimal" />
+                    <Field label={`Preço para ${batchItems.length} produto(s) (R$)`} value={updatedItemPrice} onChange={setUpdatedItemPrice} inputMode="decimal" />
                     <div className="self-end">
-                      <ActionButton disabled={busy} onClick={() => updatePrice('patch-item-price', () => batchItems.map((item) => ({ itemId: item.item.id, price: { value: parsePrice(updatedItemPrice) } })), 'Preço aplicado por PATCH /items/price.')}>Atualizar {batchItems.length} item(ns)</ActionButton>
+                      <ActionButton disabled={busy} onClick={() => updatePrice('patch-item-price', () => batchItems.map((item) => ({ itemId: item.item.id, price: { value: parsePrice(updatedItemPrice) } })), 'Preços dos produtos atualizados.')}>Atualizar preços</ActionButton>
                     </div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -692,27 +892,28 @@ export default function IfoodHomologationPage() {
                     ))}
                   </div>
                   {currentItem.options.length > 0 && (
-                    <ActionButton secondary disabled={busy} onClick={() => updatePrice('patch-option-price', () => currentItem.options.map((option, index) => ({ optionId: option.id, price: { value: parsePrice(updatedOptionPrices[index]) } })), 'Preços dos complementos atualizados por PATCH /options/price.')}>Atualizar complementos (PATCH /options/price)</ActionButton>
+                    <ActionButton secondary disabled={busy} onClick={() => updatePrice('patch-option-price', () => currentItem.options.map((option, index) => ({ optionId: option.id, price: { value: parsePrice(updatedOptionPrices[index]) } })), 'Preços dos complementos atualizados.')}>Atualizar preços dos complementos</ActionButton>
                   )}
-                </Panel>
-
-                <Panel title="Atualizações de disponibilidade (PATCH)">
-                  <div className="flex flex-wrap gap-2">
-                    <ActionButton secondary disabled={busy} onClick={() => patchStatus('patch-item-status', batchItems.map((item) => ({ itemId: item.item.id, status: 'UNAVAILABLE' })), 'Itens pausados por PATCH /items/status.')}>Pausar itens do lote</ActionButton>
-                    <ActionButton secondary disabled={busy} onClick={() => patchStatus('patch-item-status', batchItems.map((item) => ({ itemId: item.item.id, status: 'AVAILABLE' })), 'Itens ativados por PATCH /items/status.')}>Ativar itens do lote</ActionButton>
+                  <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-4">
+                    <ActionButton secondary disabled={busy} onClick={() => patchStatus('patch-item-status', batchItems.map((item) => ({ itemId: item.item.id, status: 'UNAVAILABLE' })), 'Produtos pausados.')}>Pausar produtos</ActionButton>
+                    <ActionButton secondary disabled={busy} onClick={() => patchStatus('patch-item-status', batchItems.map((item) => ({ itemId: item.item.id, status: 'AVAILABLE' })), 'Produtos ativados.')}>Ativar produtos</ActionButton>
                     {currentItem.options.length > 0 && (
-                      <ActionButton secondary disabled={busy} onClick={() => patchStatus('patch-option-status', currentItem.options.map((option) => ({ optionId: option.id, status: 'UNAVAILABLE' })), 'Complementos pausados por PATCH /options/status.')}>Pausar complementos</ActionButton>
+                      <ActionButton secondary disabled={busy} onClick={() => patchStatus('patch-option-status', currentItem.options.map((option) => ({ optionId: option.id, status: 'UNAVAILABLE' })), 'Complementos pausados.')}>Pausar complementos</ActionButton>
                     )}
                     {currentItem.options.length > 0 && (
-                      <ActionButton secondary disabled={busy} onClick={() => patchStatus('patch-option-status', currentItem.options.map((option) => ({ optionId: option.id, status: 'AVAILABLE' })), 'Complementos ativados por PATCH /options/status.')}>Ativar complementos</ActionButton>
+                      <ActionButton secondary disabled={busy} onClick={() => patchStatus('patch-option-status', currentItem.options.map((option) => ({ optionId: option.id, status: 'AVAILABLE' })), 'Complementos ativados.')}>Ativar complementos</ActionButton>
                     )}
                   </div>
                 </Panel>
               </>
             )}
 
-            <Panel title="Dados atuais do Catalog">
-              <JsonPanel title="Categorias, itens e complementos" value={categories} />
+            <Panel title="Resumo do cardápio">
+              <div className="flex flex-wrap gap-6 text-sm">
+                <p><span className="text-gray-500">Categorias</span><strong className="ml-2 text-gray-900">{categories.length}</strong></p>
+                <p><span className="text-gray-500">Itens listados</span><strong className="ml-2 text-gray-900">{catalogItemCount}</strong></p>
+              </div>
+              <JsonPanel title="Dados detalhados do cardápio" value={categories} />
             </Panel>
           </div>
         )}

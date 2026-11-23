@@ -108,9 +108,9 @@ Em produção, anote os 3 `merchantId` retornados para `IFOOD_MERCHANT_IDS`. No 
 
 No ambiente de desenvolvimento, use as credenciais do aplicativo de teste em `IFOOD_CLIENT_ID` e `IFOOD_CLIENT_SECRET` e deixe exatamente um `merchantId` de teste em `IFOOD_MERCHANT_IDS`. A identificação do ambiente usa essa lista: com exatamente um ID a homologação fica habilitada; com mais de um ID (configuração de produção) as operações ficam bloqueadas. Não misture IDs de lojas de produção na configuração de desenvolvimento.
 
-Os IDs disponíveis podem ser conferidos na tela **Homologação iFood** do painel administrativo. As operações de pausa, horário, categoria, item, preço e disponibilidade alteram os dados da loja selecionada. As credenciais permanecem no servidor e não são expostas ao navegador.
+Os IDs disponíveis podem ser conferidos na tela **Gestão da loja** do painel administrativo. As operações de pausa, horário, categoria, item, preço e disponibilidade alteram os dados da loja selecionada. A interface indica o ambiente de teste; as credenciais permanecem no servidor e não são expostas ao navegador.
 
-No painel administrativo, abra **Homologação iFood** para executar os cenários Merchant e Catalog e conferir as respostas da API. Grave cada cenário separadamente, mostrando também o Portal do Parceiro. Envie ao suporte os links dos vídeos, a data/hora e o `client_id` do app de teste, além dos logs de HTTP Requests baixados em **Developer Portal → Logs da API**.
+No painel administrativo, abra **Gestão da loja** para operar a loja de teste e conferir as respostas da API. Grave cada cenário separadamente, mostrando também o Portal do Parceiro. Envie ao suporte os links dos vídeos, a data/hora e o `client_id` do app de teste, além dos logs de HTTP Requests baixados em **Developer Portal → Logs da API**.
 
 ---
 
