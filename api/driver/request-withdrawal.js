@@ -44,6 +44,21 @@ export default async function handler(req, res) {
     });
   }
 
+  const { data: adjustments, error: adjustmentsError } = await supabaseAdmin
+    .from('driver_balance_adjustments')
+    .select('id')
+    .eq('driver_id', driverId)
+    .limit(1);
+  if (adjustmentsError) {
+    console.error('=== [API /api/driver/request-withdrawal] erro ao verificar ajustes ===', adjustmentsError);
+    return res.status(500).json({ error: 'Erro ao verificar ajustes de saldo' });
+  }
+  if (adjustments.length > 0) {
+    return res.status(409).json({
+      error: 'Este saldo possui ajustes. Solicite o pagamento ao administrador.'
+    });
+  }
+
   // já existe uma solicitação pendente? não deixa duplicar
   const { data: existingPending } = await supabaseAdmin
     .from('withdrawal_requests')

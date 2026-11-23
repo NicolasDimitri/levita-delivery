@@ -136,6 +136,18 @@ create table public.delivery_history (
 create index delivery_history_driver_id_idx
   on public.delivery_history(driver_id);
 
+create table public.driver_balance_adjustments (
+  id uuid primary key default gen_random_uuid(),
+  driver_id uuid not null references public.profiles(id),
+  amount numeric(10,2) not null check (amount <> 0),
+  reason text not null check (length(trim(reason)) between 1 and 300),
+  created_by uuid not null default auth.uid() references public.profiles(id),
+  created_at timestamptz not null default now()
+);
+
+create index driver_balance_adjustments_driver_id_idx
+  on public.driver_balance_adjustments(driver_id);
+
 -- A deleted admin profile must not erase or block historical withdrawals.
 create table public.withdrawals (
   id uuid primary key default gen_random_uuid(),
@@ -506,6 +518,7 @@ alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.order_item_additions enable row level security;
 alter table public.delivery_history enable row level security;
+alter table public.driver_balance_adjustments enable row level security;
 alter table public.withdrawals enable row level security;
 alter table public.webhook_events enable row level security;
 alter table public.ifood_webhook_attempts enable row level security;
@@ -581,6 +594,25 @@ create policy "driver ve seu proprio historico"
   on public.delivery_history for select
   using (driver_id = auth.uid());
 
+create policy "admin ve ajustes de saldo"
+  on public.driver_balance_adjustments for select
+  using (public.is_admin());
+
+create policy "driver ve seus ajustes de saldo"
+  on public.driver_balance_adjustments for select
+  using (driver_id = auth.uid());
+
+create policy "admin registra ajustes de saldo"
+  on public.driver_balance_adjustments for insert
+  with check (
+    public.is_admin()
+    and created_by = auth.uid()
+    and exists (
+      select 1 from public.profiles
+      where profiles.id = driver_id and profiles.role = 'driver'
+    )
+  );
+
 create policy "admin acesso total a withdrawals"
   on public.withdrawals for all
   using (public.is_admin())
@@ -611,6 +643,7 @@ grant select, update on public.orders to authenticated;
 grant select on public.order_items to authenticated;
 grant select on public.order_item_additions to authenticated;
 grant select on public.delivery_history to authenticated;
+grant select, insert on public.driver_balance_adjustments to authenticated;
 grant select, insert on public.withdrawals to authenticated;
 grant select, insert, update, delete on public.expenses to authenticated;
 grant select, insert, update, delete on public.payments to authenticated;
@@ -621,6 +654,7 @@ grant all on public.orders to service_role;
 grant all on public.order_items to service_role;
 grant all on public.order_item_additions to service_role;
 grant all on public.delivery_history to service_role;
+grant all on public.driver_balance_adjustments to service_role;
 grant all on public.withdrawals to service_role;
 grant all on public.webhook_events to service_role;
 grant all on public.ifood_webhook_attempts to service_role;
@@ -630,6 +664,7 @@ grant all on public.payments to service_role;
 -- Realtime updates consumed by the admin and driver order screens.
 alter publication supabase_realtime add table public.orders;
 alter publication supabase_realtime add table public.delivery_history;
+alter publication supabase_realtime add table public.driver_balance_adjustments;
 
 commit;
 
