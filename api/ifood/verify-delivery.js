@@ -126,7 +126,7 @@ export default async function handler(req, res) {
       ? updateOrderQuery.eq('driver_id', order.driver_id)
       : updateOrderQuery.is('driver_id', null);
     const { data: updatedOrder, error: updateOrderError } = await updateOrderQuery
-      .select('id')
+      .select('id, driver_id, latitude, longitude, route_latitude, route_longitude')
       .maybeSingle();
 
     if (updateOrderError) {
@@ -153,8 +153,8 @@ export default async function handler(req, res) {
       }
     }
 
-    if (order.driver_id) {
-      await recordDriverEarnings(supabaseAdmin, order);
+    if (updatedOrder.driver_id) {
+      await recordDriverEarnings(supabaseAdmin, updatedOrder);
     }
   } catch (err) {
     console.error('=== [VERIFY-DELIVERY] erro inesperado pós-confirmação iFood ===', err);

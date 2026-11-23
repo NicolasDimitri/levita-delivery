@@ -12,15 +12,25 @@ let duplicate = false;
 let failLookup = false;
 let simulatePlaced = false;
 let simulateConcluded = false;
+let simulateVerification = false;
 let routeRequest: unknown;
 let savedEarnings: unknown;
 let calls: string[] = [];
 
 globalThis.fetch = (input, init) => {
   const url = new URL(input instanceof Request ? input.url : String(input));
-  if (simulateConcluded && url.hostname === 'api.heigit.org') {
+  if ((simulateConcluded || simulateVerification) && url.hostname === 'api.heigit.org') {
     routeRequest = JSON.parse(String(init?.body));
     return Promise.resolve(Response.json({ routes: [{ summary: { distance: 2500.1 } }] }));
+  }
+  if (simulateVerification && url.hostname === 'merchant-api.ifood.com.br') {
+    if (url.pathname === '/authentication/v1.0/oauth/token') {
+      return Promise.resolve(Response.json({ accessToken: 'test-token', expiresIn: 3600 }));
+    }
+    if (url.pathname === '/order/v1.0/orders/order-1/verifyDeliveryCode') {
+      return Promise.resolve(new Response(null, { status: 200 }));
+    }
+    throw new Error('Unexpected iFood request');
   }
   if (simulatePlaced && url.hostname === 'merchant-api.ifood.com.br') {
     calls.push(`${init?.method ?? 'GET'} ${url.pathname}`);
@@ -34,14 +44,23 @@ globalThis.fetch = (input, init) => {
   }
   if (url.hostname !== 'test.supabase.co') throw new Error('Unexpected network request');
   calls.push(`${init?.method ?? 'GET'} ${url.pathname}`);
-  if (simulateConcluded && url.pathname.endsWith('/orders') && init?.method === 'GET') {
+  if (simulateVerification && url.pathname === '/auth/v1/user') {
+    return Promise.resolve(Response.json({ id: 'driver-1' }));
+  }
+  if ((simulateConcluded || simulateVerification) && url.pathname.endsWith('/orders') && init?.method === 'GET') {
     return Promise.resolve(Response.json({
-      id: 'local-1', status: 'entregue', driver_id: 'driver-1',
+      id: 'local-1', status: 'em_rota', driver_id: 'driver-1',
       ifood_order_id: 'order-1', subtotal: { total: {} },
       latitude: -7.23, longitude: -35.87
     }));
   }
-  if (simulateConcluded && url.pathname.endsWith('/delivery_history')) {
+  if ((simulateConcluded || simulateVerification) && url.pathname.endsWith('/orders') && init?.method === 'PATCH') {
+    return Promise.resolve(Response.json({
+      id: 'local-1', status: 'entregue', driver_id: 'driver-1',
+      latitude: -7.23, longitude: -35.87, route_latitude: -7.24, route_longitude: -35.88
+    }));
+  }
+  if ((simulateConcluded || simulateVerification) && url.pathname.endsWith('/delivery_history')) {
     if (init?.method === 'GET') return Promise.resolve(Response.json({ id: 'history-1', valor_entrega: null }));
     if (init?.method === 'PATCH') savedEarnings = JSON.parse(String(init.body));
     return Promise.resolve(new Response(null, { status: 201 }));
@@ -62,6 +81,7 @@ globalThis.fetch = (input, init) => {
 };
 
 const { default: handler } = await import('../../../api/ifood/webhook.js');
+const { default: verifyHandler } = await import('../../../api/ifood/verify-delivery.js');
 
 function request(body: string, signature = createHmac('sha256', secret).update(body).digest('hex')) {
   return new Request('https://example.test/functions/v1/ifood-webhook?token=private', {
@@ -143,7 +163,7 @@ Deno.test('calculates the driver payout for a concluded event in the Edge runtim
     const response = await adaptWebhookRequest(request(body), handler);
     assert(response.status === 202, 'The concluded event must be accepted');
     assert(JSON.stringify(routeRequest) === JSON.stringify({
-      coordinates: [[-35.868339, -7.224483], [-35.87, -7.23]],
+      coordinates: [[-35.868339, -7.224483], [-35.88, -7.24]],
       preference: 'shortest'
     }), 'The shortest route must be requested');
     assert(JSON.stringify(savedEarnings) === JSON.stringify({
@@ -151,5 +171,32 @@ Deno.test('calculates the driver payout for a concluded event in the Edge runtim
     }), 'The route payout must be saved');
   } finally {
     simulateConcluded = false;
+  }
+});
+
+Deno.test('confirmation uses coordinates returned by the completed order update', async () => {
+  simulateVerification = true;
+  routeRequest = undefined;
+  savedEarnings = undefined;
+  let responseStatus = 0;
+  try {
+    await verifyHandler({
+      method: 'POST',
+      headers: { authorization: 'Bearer test-token' },
+      body: { orderId: 'local-1', code: '1234' }
+    }, {
+      status(status: number) {
+        responseStatus = status;
+        return { json: (body: unknown) => body };
+      }
+    });
+    assert(responseStatus === 200, 'Confirmation must succeed');
+    assert(JSON.stringify(routeRequest) === JSON.stringify({
+      coordinates: [[-35.868339, -7.224483], [-35.88, -7.24]],
+      preference: 'shortest'
+    }), 'Payout must use the latest corrected coordinates');
+    assert((savedEarnings as { valor_entrega?: number })?.valor_entrega === 6, 'Payout must be saved');
+  } finally {
+    simulateVerification = false;
   }
 });
