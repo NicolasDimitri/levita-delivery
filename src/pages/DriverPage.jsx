@@ -269,7 +269,7 @@ export default function DriverPage() {
           <div className="flex items-center gap-3">
             <div className="text-right">
               <p className="text-xs text-gray-400">Saldo</p>
-              <p className="text-sm font-bold text-green-700">R$ {balance.toFixed(2)}</p>
+              <p className="text-sm font-bold text-green-700">{balance === null ? '—' : `R$ ${balance.toFixed(2)}`}</p>
               {balanceError && <p className="max-w-32 text-xs text-red-600">{balanceError}</p>}
             </div>
             <button onClick={signOut} className="text-xs text-gray-400 hover:text-gray-700">Sair</button>
