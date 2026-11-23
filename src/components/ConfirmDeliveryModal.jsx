@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { extractDigitsFromSpeech } from '../lib/extractDigitsFromSpeech';
 
+const INVALID_DELIVERY_CODE_MESSAGE = 'Código inválido';
+
 async function callApi(path, options = {}) {
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
@@ -124,14 +126,18 @@ export default function ConfirmDeliveryModal({ order, hasStoredCode, onClose, on
       });
 
       if (!result.valid) {
-        setError('Código incorreto. Peça o código novamente ao cliente.');
+        setError(INVALID_DELIVERY_CODE_MESSAGE);
         setLoading(false);
         return;
       }
 
       onConfirmed();
     } catch (err) {
-      setError(err.message);
+      setError(
+        err.message?.includes('Confirmation code is invalid')
+          ? INVALID_DELIVERY_CODE_MESSAGE
+          : err.message || 'Não foi possível confirmar a entrega. Tente novamente.'
+      );
       setLoading(false);
     }
   }
