@@ -6,6 +6,7 @@
 // HMAC corretamente, por isso desabilitamos o bodyParser automático do Vercel.
 
 import crypto from 'crypto';
+import { Buffer } from 'node:buffer';
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { getOrderDetails, classifyPayment } from '../../lib/ifood.js';
 import { getDeliveryCoordinates } from '../../lib/deliveryAddress.js';

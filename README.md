@@ -185,6 +185,25 @@ limit 100;
 
 **Clientes problemáticos:** antes de publicar a funcionalidade, execute `supabase/migration_customer_problem_flag.sql` no SQL Editor do Supabase. No painel administrativo, é possível marcar um cliente pelo cartão de qualquer pedido; o alerta e o motivo opcional aparecem nos pedidos seguintes desse cliente. A marcação é apenas informativa e pode ser removida no próprio cartão.
 
+### Webhook no Supabase
+
+A Edge Function `ifood-webhook` reutiliza o processamento e a validação de assinatura do webhook da Vercel. A publicação da função não altera automaticamente a URL cadastrada no iFood.
+
+1. Confirme o **Project Reference ID** do ambiente escolhido e que o banco possui as tabelas e migrações necessárias, incluindo `webhook_events` e `ifood_webhook_attempts`. Aplique `supabase/migration_ifood_webhook_attempts.sql` somente se necessário.
+2. Em **Edge Functions → Secrets** do projeto escolhido, configure `IFOOD_CLIENT_ID` e `IFOOD_CLIENT_SECRET` com as credenciais da aplicação iFood correspondente ao ambiente. Não coloque esses valores no repositório. `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` são fornecidos pelo Supabase à função.
+3. Após autenticar a CLI do Supabase, publique no projeto escolhido:
+
+   ```sh
+   npx supabase@3.2.0 functions deploy ifood-webhook --use-api --remote=ID_DO_PROJETO --no-verify-jwt
+   ```
+
+4. Antes de alterar o endereço no iFood, confira a implantação e teste uma requisição sem assinatura: ela deve receber `401`. A função não usa JWT do Supabase porque o iFood não o envia; a assinatura HMAC do iFood continua obrigatória.
+5. Configure na aplicação iFood correspondente a URL `https://ID_DO_PROJETO.supabase.co/functions/v1/ifood-webhook`. Antes de migrar produção, valide um pedido completo em desenvolvimento. Na troca de produção, mantenha a URL anterior da Vercel para reversão e acompanhe o recebimento dos eventos e pedidos.
+
+Monitore os logs e o uso de Edge Functions no Supabase e os de CPU na Vercel. Pausar o projeto Supabase de desenvolvimento também interrompe o webhook.
+
+Para limpar os registros do banco de desenvolvimento, execute `supabase/migration_dev_webhook_cleanup.sql` **somente no projeto de desenvolvimento**. Ela agenda no Supabase, diariamente às 06:00 UTC, a exclusão de eventos com mais de 48 horas e tentativas com mais de 30 dias. A limpeza de produção continua agendada na Vercel.
+
 ---
 
 ## 5. Como testar o fluxo de ponta a ponta
