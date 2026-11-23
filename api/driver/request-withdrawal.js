@@ -6,8 +6,12 @@
 // do que realmente tem direito mandando um insert direto.
 
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
+import retryRouteEarnings from '../../lib/retryRouteEarnings.js';
 
 export default async function handler(req, res) {
+  if (req.method === 'POST' && req.body?.action === 'retry_route_earnings') {
+    return retryRouteEarnings(req, res);
+  }
   console.log('=== [API /api/driver/request-withdrawal] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,

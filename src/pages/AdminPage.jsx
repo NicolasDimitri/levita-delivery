@@ -174,7 +174,9 @@ export default function AdminPage() {
     setRetryingEarnings(item.id);
     setRetryError('');
     try {
-      await call('/api/driver/retry-route-earnings', { body: { orderId: item.order_id } });
+      await call('/api/driver/request-withdrawal', {
+        body: { action: 'retry_route_earnings', orderId: item.order_id }
+      });
     } catch (error) {
       setRetryError(`Pedido ${item.orders?.display_id || item.order_id}: ${error.message}`);
     } finally {
