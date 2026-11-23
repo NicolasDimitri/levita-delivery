@@ -5,6 +5,7 @@ import SignupPage from './pages/SignupPage';
 import AdminPage from './pages/AdminPage';
 import DriverPage from './pages/DriverPage';
 import ExpensesPage from './pages/ExpensesPage';
+import InventoryPage from './pages/InventoryPage';
 import DevBanner from './components/DevBanner';
 
 function PrivateRoute({ role, children }) {
@@ -63,6 +64,15 @@ export default function App() {
           element={
             <PrivateRoute role="admin">
               <ExpensesPage />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/estoque"
+          element={
+            <PrivateRoute role="admin">
+              <InventoryPage />
             </PrivateRoute>
           }
         />
