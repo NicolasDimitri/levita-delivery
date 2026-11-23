@@ -31,7 +31,7 @@ export default function AvailableOrderCard({ order, activeCount, onAccepted }) {
         <div className="min-w-0">
           <p className="truncate font-semibold text-sm text-gray-800">{order.customer_name}</p>
           <p className="text-sm text-gray-600">
-            {order.route_address || [order.street, order.street_number, order.neighborhood].filter(Boolean).join(', ') || 'Endereço pendente'}
+            {[order.street, order.street_number, order.neighborhood].filter(Boolean).join(', ') || 'Endereço indisponível'}
           </p>
           {order.display_id && <p className="text-xs text-gray-400">Pedido #{order.display_id}</p>}
         </div>

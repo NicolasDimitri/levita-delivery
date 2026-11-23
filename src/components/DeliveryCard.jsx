@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import PaymentBadge from './PaymentBadge';
 import ConfirmDeliveryModal from './ConfirmDeliveryModal';
 import CountdownTimer from './CountdownTimer';
-import { buildWazeDestinationUrl, getOrderNavigationAddress } from '../../lib/deliveryAddress';
+import { buildWazeDestinationUrl, getGoogleMapsDestination, getOrderCopyAddress } from '../../lib/deliveryAddress';
 import { useApi } from '../lib/useApi';
 import OrderDiscounts from './OrderDiscounts';
 
@@ -32,7 +32,8 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
     return () => { active = false; };
   }, [call, order.id, order.status]);
 
-  const navigationAddress = getOrderNavigationAddress(order);
+  const destination = getGoogleMapsDestination(order).destination;
+  const copyAddress = getOrderCopyAddress(order);
   const streetAddress = [order.street, order.street_number].filter(Boolean).join(', ');
   const locality = [
     order.neighborhood,
@@ -59,14 +60,14 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
             : 'Pronto para despachar';
 
   async function handleCopyAddress() {
-    if (!navigationAddress) return;
+    if (!copyAddress) return;
     try {
-      await navigator.clipboard.writeText(navigationAddress);
+      await navigator.clipboard.writeText(copyAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // navigator.clipboard pode falhar em http (não-https) ou navegadores antigos
-      alert('Não foi possível copiar automaticamente. Endereço: ' + navigationAddress);
+      alert('Não foi possível copiar automaticamente. Endereço: ' + copyAddress);
     }
   }
 
@@ -92,7 +93,7 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
         <div>
           <p className="font-semibold">{order.customer_name}</p>
           <p className="whitespace-pre-line text-sm text-gray-600">
-            {order.route_address || fullAddress || 'Endereço não informado'}
+            {fullAddress || 'Endereço não informado'}
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
@@ -146,10 +147,10 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
       {order.status === 'em_rota' && (
         <div className="space-y-2">
           {navigationApp === 'waze' && (
-            navigationAddress
+            destination
               ? (
                   <a
-                    href={buildWazeDestinationUrl(navigationAddress)}
+                    href={buildWazeDestinationUrl(destination)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block w-full rounded-lg bg-blue-600 py-2 text-center text-sm font-semibold text-white hover:bg-blue-700"
@@ -170,10 +171,10 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
           <div className="flex gap-2">
             <button
               onClick={handleCopyAddress}
-              disabled={!navigationAddress}
+              disabled={!copyAddress}
               className="flex-1 rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              {copied ? 'Endereço copiado!' : navigationAddress ? 'Copiar endereço' : 'Endereço pendente'}
+              {copied ? 'Endereço copiado!' : copyAddress ? 'Copiar endereço' : 'Endereço indisponível'}
             </button>
             <button
               onClick={() => setShowModal(true)}
