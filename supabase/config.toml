@@ -1,0 +1,2 @@
+[functions.ifood-webhook]
+verify_jwt = false
