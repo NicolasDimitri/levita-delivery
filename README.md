@@ -55,7 +55,7 @@ Não precisa fazer nada aqui — eles se cadastram pela tela `/cadastro` do pró
 3. **Categoria do aplicativo:** escolha **PDV**
 4. **Tipo de aplicativo:** escolha **Centralizado**
 5. Preencha nome, slug e descrição (qualquer texto, é só pra você reconhecer o app)
-6. **Módulos:** marque **Order**, **Events** e **Merchant**. Não marque Catalog, Review nem Shipping (não são usados neste app)
+6. **Módulos:** para a operação do app, marque **Order**, **Events** e **Merchant**. O módulo **Catalog** também é necessário para executar a homologação descrita na seção 2.6. Review e Shipping não são usados.
 
 ### 2.2 Pegar as credenciais
 1. Dentro do app criado, vá na aba **Credenciais**
@@ -102,7 +102,15 @@ curl -X POST "https://merchant-api.ifood.com.br/authentication/v1.0/oauth/token"
 curl -X GET "https://merchant-api.ifood.com.br/merchant/v1.0/merchants" \
   -H "Authorization: Bearer SEU_ACCESS_TOKEN"
 ```
-Anote os 3 `merchantId` retornados → variável `IFOOD_MERCHANT_IDS` (separados por vírgula, sem espaço).
+Em produção, anote os 3 `merchantId` retornados para `IFOOD_MERCHANT_IDS`. No ambiente de desenvolvimento, use somente o ID da loja de teste.
+
+### 2.6 Preparar o aplicativo de teste para homologação
+
+No ambiente de desenvolvimento, use as credenciais do aplicativo de teste em `IFOOD_CLIENT_ID` e `IFOOD_CLIENT_SECRET` e deixe exatamente um `merchantId` de teste em `IFOOD_MERCHANT_IDS`. A identificação do ambiente usa essa lista: com exatamente um ID a homologação fica habilitada; com mais de um ID (configuração de produção) as operações ficam bloqueadas. Não misture IDs de lojas de produção na configuração de desenvolvimento.
+
+Os IDs disponíveis podem ser conferidos na tela **Homologação iFood** do painel administrativo. As operações de pausa, horário, categoria, item, preço e disponibilidade alteram os dados da loja selecionada. As credenciais permanecem no servidor e não são expostas ao navegador.
+
+No painel administrativo, abra **Homologação iFood** para executar os cenários Merchant e Catalog e conferir as respostas da API. Grave cada cenário separadamente, mostrando também o Portal do Parceiro. Envie ao suporte os links dos vídeos, a data/hora e o `client_id` do app de teste, além dos logs de HTTP Requests baixados em **Developer Portal → Logs da API**.
 
 ---
 

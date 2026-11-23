@@ -174,6 +174,7 @@ export default function AdminPage() {
             <div className="flex items-center gap-3">
               <StoreStatusToggle />
               <Link to="/financeiro" className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Financeiro</Link>
+              <Link to="/homologacao-ifood" className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-800 hover:bg-orange-100">Homologação iFood</Link>
               <Button variant="ghost" onClick={signOut}>Sair</Button>
             </div>
           </div>

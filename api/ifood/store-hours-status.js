@@ -9,8 +9,13 @@ import {
   isOpeningHoursOpen,
   isInterruptionActive
 } from '../../lib/ifood.js';
+import homologationHandler from '../../lib/ifood-homologation-handler.js';
 
 export default async function handler(req, res) {
+  if (req.query?.homologation === '1' || req.body?.homologation === true) {
+    return homologationHandler(req, res);
+  }
+
   console.log('=== [API /api/ifood/store-hours-status] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,
