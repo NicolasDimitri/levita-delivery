@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import DeliveryCard from '../components/DeliveryCard';
 import AvailableOrderCard from '../components/AvailableOrderCard';
+import IfoodChatWidget from '../components/IfoodChatWidget';
 import { useApi } from '../lib/useApi';
 import { fmtBRL } from '../lib/constants';
 import { calculateDriverBalance } from '../lib/driverBalance';
@@ -210,8 +211,8 @@ export default function DriverPage() {
     order,
     ...getGoogleMapsDestination(order)
   }));
-  const ordersWithoutAddress = routeStops.filter((stop) => !stop.destination).length;
-  const route = routeOrders.length === 0 || ordersWithoutAddress
+  const ordersWithoutCoordinates = routeStops.filter((stop) => !stop.destination).length;
+  const route = routeOrders.length === 0 || ordersWithoutCoordinates
     ? { batches: [], failedIndex: -1 }
     : buildGoogleMapsRouteBatches([
       ...routeStops.map((stop) => stop.destination),
@@ -276,6 +277,10 @@ export default function DriverPage() {
             </div>
             <button onClick={signOut} className="text-xs text-gray-400 hover:text-gray-700">Sair</button>
           </div>
+        </div>
+
+        <div className="mx-auto mt-2 max-w-md">
+          <IfoodChatWidget />
         </div>
 
         {/* abas */}
@@ -363,14 +368,14 @@ export default function DriverPage() {
                     </div>
                   </div>
                 )}
-                {ordersWithoutAddress > 0 && (
+                {ordersWithoutCoordinates > 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
-                    {ordersWithoutAddress} entrega(s) aguardando endereço correto cadastrado pelo administrador.
+                    {ordersWithoutCoordinates} entrega(s) sem coordenadas válidas. Avise o administrador.
                   </p>
                 )}
                 {route.failedIndex >= 0 && (
                   <p className="mt-1 text-center text-xs text-red-600">
-                    Não foi possível criar a rota a partir da parada {route.failedIndex + 1}; confira o tamanho ou conteúdo do endereço.
+                    Não foi possível criar a rota a partir da parada {route.failedIndex + 1}; confira as coordenadas.
                   </p>
                 )}
                 {ordersWaitingForReady.length > 0 && (
@@ -497,7 +502,7 @@ export default function DriverPage() {
               </button>
             )}
             {navigationApp === 'google-maps' && routeOrders.length > 0 && (
-              route.batches.length > 0 && route.failedIndex < 0 && ordersWithoutAddress === 0
+              route.batches.length > 0 && route.failedIndex < 0 && ordersWithoutCoordinates === 0
                 ? route.batches.map((batch, index) => (
                     <a
                       key={`${index}-${batch.url}`}
@@ -517,7 +522,7 @@ export default function DriverPage() {
                       disabled
                       className="w-full rounded-lg bg-gray-300 py-3 text-sm font-semibold text-gray-600"
                     >
-                      Rota indisponível: verifique os endereços
+                      Rota indisponível: verifique as coordenadas
                     </button>
                   )
             )}

@@ -9,7 +9,7 @@ import crypto from 'crypto';
 import { Buffer } from 'node:buffer';
 import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
 import { getOrderDetails, classifyPayment } from '../../lib/ifood.js';
-import { getDeliveryCoordinates, getPreviousRouteAddress } from '../../lib/deliveryAddress.js';
+import { getDeliveryCoordinates, getPreviousRouteCorrection } from '../../lib/deliveryAddress.js';
 import { recordDriverEarnings } from '../../lib/driverRouteEarnings.js';
 
 export const config = {
@@ -323,34 +323,33 @@ async function handlePlaced(event) {
   }
 
   const orderData = {
-    ifood_order_id: order.id,
-    display_id: order.displayId,
-    merchant_id: order.merchant?.id,
-    ifood_customer_id: customer.id,
-    customer_name: customer.name,
-    street: address.streetName,
-    street_number: address.streetNumber,
-    neighborhood: address.neighborhood,
-    complement: address.complement,
-    reference: address.reference,
-    city: address.city,
-    state: address.state,
-    postal_code: address.postalCode,
-    latitude: coordinates?.latitude ?? null,
-    longitude: coordinates?.longitude ?? null,
-    payment_category: paymentCategory,
-    payment_raw: payments,
-    total_value: order.total?.orderAmount ?? 0,
-    subtotal: order,
-    delivery_fee: order.total?.deliveryFee ?? 0,
-    benefits_raw: order.benefits ?? [],
-    benefits_value: order.total?.benefits ?? 0,
-    delivery_date_time: delivery.deliveryDateTime || null,
-    status: 'recebido'
+      ifood_order_id: order.id,
+      display_id: order.displayId,
+      merchant_id: order.merchant?.id,
+      ifood_customer_id: customer.id,
+      customer_name: customer.name,
+      street: address.streetName,
+      street_number: address.streetNumber,
+      neighborhood: address.neighborhood,
+      complement: address.complement,
+      reference: address.reference,
+      city: address.city,
+      state: address.state,
+      postal_code: address.postalCode,
+      latitude: coordinates?.latitude ?? null,
+      longitude: coordinates?.longitude ?? null,
+      payment_category: paymentCategory,
+      payment_raw: payments,
+      total_value: order.total?.orderAmount ?? 0,
+      subtotal: order,
+      delivery_fee: order.total?.deliveryFee ?? 0,
+      benefits_raw: order.benefits ?? [],
+      benefits_value: order.total?.benefits ?? 0,
+      delivery_date_time: delivery.deliveryDateTime || null,
+      status: 'recebido'
   };
-  const correction = await getPreviousRouteAddress(supabaseAdmin, customer.id, orderData);
+  const correction = await getPreviousRouteCorrection(supabaseAdmin, customer.id, orderData);
   if (correction) Object.assign(orderData, correction);
-
   const { data: insertedOrder, error } = await supabaseAdmin
     .from('orders')
     .insert(orderData)
@@ -460,7 +459,7 @@ async function handlePlaced(event) {
 async function handleConcluded(event) {
   const { data: order, error: orderError } = await supabaseAdmin
     .from('orders')
-    .select('id, status, driver_id, ifood_order_id, subtotal, latitude, longitude, route_address, corrected_latitude, corrected_longitude')
+    .select('id, status, driver_id, ifood_order_id, subtotal, latitude, longitude, route_latitude, route_longitude')
     .eq('ifood_order_id', event.orderId)
     .maybeSingle();
   if (orderError) throw orderError;
@@ -477,26 +476,28 @@ async function handleConcluded(event) {
   await syncOrderSubtotal(order, event);
 
   let statusUpdated = false;
+  let creditOrder = order;
   if (order.status !== 'entregue') {
     const { data: updatedOrder, error: updateError } = await supabaseAdmin
       .from('orders')
       .update({ status: 'entregue', delivered_at: new Date().toISOString() })
       .eq('id', order.id)
       .neq('status', 'cancelado')
-      .select('id, driver_id, latitude, longitude, route_address, corrected_latitude, corrected_longitude')
+      .select('id, status, driver_id, latitude, longitude, route_latitude, route_longitude')
       .maybeSingle();
     if (updateError) throw updateError;
     statusUpdated = Boolean(updatedOrder);
-    if (updatedOrder) Object.assign(order, updatedOrder);
+    if (updatedOrder) creditOrder = updatedOrder;
     if (!updatedOrder) {
       const { data: latestOrder, error: latestOrderError } = await supabaseAdmin
         .from('orders')
-        .select('status')
+        .select('id, status, driver_id, latitude, longitude, route_latitude, route_longitude')
         .eq('id', order.id)
         .single();
       if (latestOrderError) throw latestOrderError;
       if (latestOrder.status === 'cancelado') return;
       if (latestOrder.status !== 'entregue') throw new Error('Não foi possível atualizar o status concluído');
+      creditOrder = latestOrder;
     }
   }
 
@@ -509,8 +510,8 @@ async function handleConcluded(event) {
     statusUpdated
   });
 
-  if (order.driver_id) {
-    await recordDriverEarnings(supabaseAdmin, order);
+  if (creditOrder.driver_id) {
+    await recordDriverEarnings(supabaseAdmin, creditOrder);
   }
 }
 

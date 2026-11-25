@@ -60,6 +60,8 @@ create table public.clientes (
   id                        uuid primary key default gen_random_uuid(),
   ifood_customer_id         text not null unique,
   nome                      text,
+  problematic               boolean not null default false,
+  motivo_problematico       text,
   ultimo_codigo_confirmacao text,
   ultimo_codigo_confirmado_em timestamptz,
   created_at                timestamptz not null default now()
@@ -330,7 +332,7 @@ grant usage on schema public to service_role;
 
 -- authenticated (frontend — protegido pelo RLS acima)
 grant select, insert on public.profiles             to authenticated;
-grant select         on public.clientes             to authenticated;
+grant select, update on public.clientes             to authenticated;
 grant select, update on public.orders               to authenticated;
 grant select         on public.order_items          to authenticated;
 grant select         on public.order_item_additions to authenticated;

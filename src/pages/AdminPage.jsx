@@ -10,6 +10,7 @@ import { calculateDriverBalance } from '../lib/driverBalance';
 import { useApi } from '../lib/useApi';
 import OrderCard from '../components/OrderCard';
 import StoreStatusToggle from '../components/StoreStatusToggle';
+import IfoodChatWidget from '../components/IfoodChatWidget';
 
 const ACTIVE_COLUMNS = [
   { status: 'recebido',   title: 'Novos pedidos' },
@@ -53,7 +54,7 @@ export default function AdminPage() {
 
   const loadOrders = useCallback(async () => {
     const { data, error } = await supabase
-      .from('orders').select('*, order_items(*, order_item_additions(*))')
+      .from('orders').select('*, cliente:clientes(problematic, motivo_problematico), order_items(*, order_item_additions(*))')
       .not('status', 'in', '("entregue","cancelado")')
       .order('created_at', { ascending: false });
     if (error) {
@@ -68,7 +69,7 @@ export default function AdminPage() {
 
   const loadFinalOrders = useCallback(async () => {
     const { data } = await supabase
-      .from('orders').select('*, order_items(*, order_item_additions(*))')
+      .from('orders').select('*, cliente:clientes(problematic, motivo_problematico), order_items(*, order_item_additions(*))')
       .in('status', ['entregue', 'cancelado'])
       .order('created_at', { ascending: false }).limit(50);
     setFinalOrders(data || []);
@@ -260,7 +261,10 @@ export default function AdminPage() {
             </div>
             <div className="flex items-center gap-3">
               <StoreStatusToggle />
+              <Link to="/estoque" className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Estoque</Link>
+              <IfoodChatWidget />
               <Link to="/financeiro" className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Financeiro</Link>
+              <Link to="/homologacao-ifood" className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-800 hover:bg-orange-100">Gestão da loja</Link>
               <Button variant="ghost" onClick={signOut}>Sair</Button>
             </div>
           </div>

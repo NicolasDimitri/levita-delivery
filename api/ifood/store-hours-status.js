@@ -9,8 +9,19 @@ import {
   isOpeningHoursOpen,
   isInterruptionActive
 } from '../../lib/ifood.js';
+import homologationHandler from '../../lib/ifood-homologation-handler.js';
+import { getWidgetConfig } from '../../lib/ifood-widget-config.js';
+import geocodeAddress from '../../lib/geocodeAddress.js';
 
 export default async function handler(req, res) {
+  if (req.query?.geocode === '1') return geocodeAddress(req, res);
+  if (req.query?.widget === '1') {
+    return getWidgetConfig(req, res, supabaseAdmin, process.env.IFOOD_MERCHANT_IDS);
+  }
+  if (req.query?.homologation === '1' || req.body?.homologation === true) {
+    return homologationHandler(req, res);
+  }
+
   console.log('=== [API /api/ifood/store-hours-status] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,

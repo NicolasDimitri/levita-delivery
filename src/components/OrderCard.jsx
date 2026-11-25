@@ -5,8 +5,9 @@ import { Button, Badge, SectionLabel, ErrorMsg } from '../lib/ui';
 import CountdownTimer from './CountdownTimer';
 import { ORDER_STATUS, fmtBRL, fmtDate } from '../lib/constants';
 import { supabase } from '../supabaseClient';
-import { isMissingStreetNumber } from '../../lib/deliveryAddress';
+import { getOrderDestinationCoordinates, parseCoordinatePair } from '../../lib/deliveryAddress';
 import OrderDiscounts from './OrderDiscounts';
+import CallCustomer from './CallCustomer';
 
 const DeliveryLocationPicker = lazy(() => import('./DeliveryLocationPicker'));
 
@@ -22,19 +23,29 @@ export default function OrderCard({ order, drivers, onChanged }) {
   const [showDriverSelector, setShowDriverSelector] = useState(false);
   const [cancellationReasons, setCancellationReasons] = useState([]);
   const [selectedCancellation, setSelectedCancellation] = useState('');
-  const [routeAddress, setRouteAddress] = useState(order.route_address || '');
-  const [showAddressEditor, setShowAddressEditor] = useState(false);
-  const [correctedLocation, setCorrectedLocation] = useState(null);
+  const [showCoordinates, setShowCoordinates] = useState(false);
+  const [coordinateInput, setCoordinateInput] = useState('');
+  const [mapAddress, setMapAddress] = useState(order.route_label || '');
+  const [mapLocation, setMapLocation] = useState(null);
+  const [showMap, setShowMap] = useState(false);
   const [error, setError] = useState('');
   const [cancellationPending, setCancellationPending] = useState(false);
+  const [showProblemEditor, setShowProblemEditor] = useState(false);
+  const [problemReason, setProblemReason] = useState('');
 
   useEffect(() => {
-    setRouteAddress(order.route_address || '');
-    setCorrectedLocation(null);
-  }, [order.id, order.route_address, order.corrected_latitude, order.corrected_longitude]);
+    const coordinates = getOrderDestinationCoordinates(order);
+    setCoordinateInput(coordinates ? `${coordinates.latitude}, ${coordinates.longitude}` : '');
+  }, [order.latitude, order.longitude, order.route_latitude, order.route_longitude]);
+
+  useEffect(() => {
+    setMapAddress(order.route_label || '');
+    setMapLocation(null);
+  }, [order.id, order.route_label, order.route_latitude, order.route_longitude]);
 
   const status = ORDER_STATUS[order.status] ?? ORDER_STATUS.recebido;
-  const needsRouteAddress = !order.street || isMissingStreetNumber(order.street_number);
+  const coordinates = getOrderDestinationCoordinates(order);
+  const canEditCoordinates = !['entregue', 'cancelado'].includes(order.status);
 
   async function run(key, fn) {
     setLoadingKey(key);
@@ -86,24 +97,59 @@ export default function OrderCard({ order, drivers, onChanged }) {
     body: { orderId: order.id, action: 'ready' }
   }));
 
-  const saveRouteAddress = () => run('route-address', async () => {
-    const value = routeAddress.trim();
-    if (!value) throw new Error('Informe um endereço ou nome de local para a rota.');
-    if (!correctedLocation) throw new Error('Selecione e confirme o destino no mapa.');
-
-    const { error: updateError } = await supabase
+  const saveCoordinates = (restore = false) => run('coordinates', async () => {
+    const value = restore ? null : parseCoordinatePair(coordinateInput);
+    if (!restore && !value) throw new Error('Informe latitude e longitude válidas, separadas por vírgula.');
+    const { data: updated, error: updateError } = await supabase
       .from('orders')
-      .update({
-        route_address: value,
-        corrected_latitude: correctedLocation.latitude,
-        corrected_longitude: correctedLocation.longitude
-      })
+      .update({ route_latitude: value?.latitude ?? null, route_longitude: value?.longitude ?? null, route_label: null })
       .eq('id', order.id)
       .in('status', ['recebido', 'em_preparo', 'pronto', 'em_rota'])
       .select('id')
+      .maybeSingle();
+    if (updateError) throw updateError;
+    if (!updated) throw new Error('O pedido foi finalizado ou não está mais disponível para alteração.');
+    setShowCoordinates(false);
+  });
+
+  const saveMapLocation = () => run('coordinates', async () => {
+    if (!mapAddress.trim() || !mapLocation) throw new Error('Informe o endereço e selecione o ponto no mapa.');
+    const { data: updated, error: updateError } = await supabase.from('orders')
+      .update({ route_latitude: mapLocation.latitude, route_longitude: mapLocation.longitude, route_label: mapAddress.trim() })
+      .eq('id', order.id)
+      .in('status', ['recebido', 'em_preparo', 'pronto', 'em_rota'])
+      .select('id').maybeSingle();
+    if (updateError) throw updateError;
+    if (!updated) throw new Error('O pedido foi finalizado ou não está mais disponível para alteração.');
+    setShowMap(false);
+    setShowCoordinates(false);
+  });
+
+  const saveCustomerProblem = () => run('customer-problem', async () => {
+    if (!order.ifood_customer_id) throw new Error('Este pedido não tem um cliente identificado pelo iFood.');
+    const { error: updateError } = await supabase
+      .from('clientes')
+      .update({
+        problematic: true,
+        motivo_problematico: problemReason.trim() || null
+      })
+      .eq('ifood_customer_id', order.ifood_customer_id)
+      .select('ifood_customer_id')
       .single();
     if (updateError) throw updateError;
-    setShowAddressEditor(false);
+    setProblemReason('');
+    setShowProblemEditor(false);
+  });
+
+  const clearCustomerProblem = () => run('customer-problem', async () => {
+    if (!order.ifood_customer_id) throw new Error('Este pedido não tem um cliente identificado pelo iFood.');
+    const { error: updateError } = await supabase
+      .from('clientes')
+      .update({ problematic: false, motivo_problematico: null })
+      .eq('ifood_customer_id', order.ifood_customer_id)
+      .select('ifood_customer_id')
+      .single();
+    if (updateError) throw updateError;
   });
 
   const assignDriver = (driverId) => {
@@ -140,6 +186,68 @@ export default function OrderCard({ order, drivers, onChanged }) {
         <Badge color={status.color}>{status.label}</Badge>
       </div>
 
+      {order.cliente?.problematic && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+          <p className="text-sm font-semibold text-red-800">Cliente marcado como problemático</p>
+          {order.cliente.motivo_problematico && (
+            <p className="mt-1 whitespace-pre-wrap text-xs text-red-700">{order.cliente.motivo_problematico}</p>
+          )}
+        </div>
+      )}
+      {order.ifood_customer_id && (
+        <div className="space-y-2">
+          {order.cliente?.problematic ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={clearCustomerProblem}
+              disabled={loading('customer-problem')}
+              className="w-full"
+            >
+              {loading('customer-problem') ? 'Removendo alerta...' : 'Remover marcação de cliente problemático'}
+            </Button>
+          ) : showProblemEditor ? (
+            <div className="space-y-2 rounded-xl border border-gray-200 p-3">
+              <label className="block text-xs font-medium text-gray-600" htmlFor={`problem-reason-${order.id}`}>
+                Motivo (opcional)
+              </label>
+              <textarea
+                id={`problem-reason-${order.id}`}
+                value={problemReason}
+                onChange={event => setProblemReason(event.target.value)}
+                maxLength={500}
+                rows={2}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+                placeholder="Descreva o ocorrido para orientar a equipe"
+              />
+              <div className="flex gap-2">
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={saveCustomerProblem}
+                  disabled={loading('customer-problem')}
+                  className="flex-1"
+                >
+                  {loading('customer-problem') ? 'Salvando...' : 'Marcar como problemático'}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setShowProblemEditor(false)}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowProblemEditor(true)}
+              className="w-full"
+            >
+              Marcar cliente como problemático
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* temporizador */}
       {order.status === 'recebido' && (
         <CountdownTimer target={new Date(new Date(order.created_at).getTime() + 8 * 60 * 1000)} label="Aceitar em" />
@@ -168,65 +276,61 @@ export default function OrderCard({ order, drivers, onChanged }) {
         </Badge>
       </div>
       <OrderDiscounts benefits={order.benefits_raw} total={order.benefits_value} />
+      {!['entregue', 'cancelado'].includes(order.status) && <CallCustomer order={order} />}
 
       <ErrorMsg message={error} />
-      {!['entregue', 'cancelado'].includes(order.status) && !showAddressEditor && (
+      {canEditCoordinates && (
         <div className="space-y-2">
-          {needsRouteAddress && !order.route_address && (
-            <p className="text-sm text-amber-800">Endereço incompleto: informe o destino correto.</p>
-          )}
-          {order.route_address && (order.corrected_latitude == null || order.corrected_longitude == null) && (
-            <p className="text-sm text-amber-800">Correção anterior sem ponto confirmado. Confirme no mapa para calcular o repasse.</p>
-          )}
-          <Button variant="secondary" onClick={() => setShowAddressEditor(true)}>Corrigir destino</Button>
-        </div>
-      )}
-      {showAddressEditor && !['entregue', 'cancelado'].includes(order.status) && (
-        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <p className="text-sm font-medium text-amber-900">
-            Informe o endereço e confirme o ponto correto para a entrega e o cálculo do repasse.
-          </p>
-          <p className="text-xs text-amber-800">
-            Pode ser “Rua, número” ou o nome do hotel, pousada, empresa ou comércio.
-          </p>
-          <p className="text-xs text-amber-800">
-            A correção será reaproveitada no próximo pedido se o endereço e as coordenadas enviados pelo iFood forem os mesmos.
-          </p>
-          <input
-            type="text"
-            value={routeAddress}
-            onChange={(event) => { setRouteAddress(event.target.value); setCorrectedLocation(null); }}
-            maxLength={300}
-            placeholder="Ex.: Rua das Flores, 123 ou Hotel Central"
-            aria-label={`Endereço correto para a rota do pedido ${order.display_id || order.id}`}
-            className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-          />
-          <Suspense fallback={<p className="text-xs">Carregando mapa...</p>}>
-            <DeliveryLocationPicker address={routeAddress} city={order.city} state={order.state} onSelect={setCorrectedLocation} />
-          </Suspense>
-          {correctedLocation && (
-            <p className="text-xs text-green-700">
-              Ponto selecionado: {correctedLocation.latitude.toFixed(6)}, {correctedLocation.longitude.toFixed(6)}
-            </p>
-          )}
-          <Button
-            variant="primary"
-            onClick={saveRouteAddress}
-            disabled={!routeAddress.trim() || !correctedLocation || loading('route-address')}
-          >
-            {loading('route-address') ? 'Salvando destino...' : 'Confirmar e salvar destino'}
+          {!coordinates && <p className="text-xs text-red-700">Coordenadas indisponíveis; informe a localização correta.</p>}
+          {order.route_latitude != null && <p className="text-xs text-amber-700">Localização corrigida pelo administrador.</p>}
+          <Button variant="secondary" onClick={() => setShowCoordinates(value => !value)}>
+            {showCoordinates ? 'Fechar localização' : 'Alterar localização'}
           </Button>
-          <Button variant="secondary" onClick={() => {
-            setShowAddressEditor(false);
-            setRouteAddress(order.route_address || '');
-            setCorrectedLocation(null);
-          }}>Cancelar</Button>
-          {order.route_address && (
-            <p className="text-xs text-green-700">
-              {order.corrected_latitude == null || order.corrected_longitude == null
-                ? 'Correção anterior sem ponto confirmado: selecione o destino no mapa.'
-                : 'Destino corrigido salvo. Se precisar alterá-lo, selecione outro ponto.'}
-            </p>
+          {showCoordinates && (
+            <div className="space-y-2 rounded-xl border border-gray-200 p-3">
+              <label className="block text-xs text-gray-600" htmlFor={`coordinates-${order.id}`}>
+                Latitude, longitude em graus decimais
+              </label>
+              <input
+                id={`coordinates-${order.id}`}
+                type="text"
+                value={coordinateInput}
+                onChange={event => setCoordinateInput(event.target.value)}
+                placeholder="-7.223361, -35.936778"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+              <p className="text-xs text-gray-500">A correção será usada na rota e no cálculo do repasse.</p>
+              <Button variant="secondary" onClick={() => setShowMap(value => !value)}>
+                {showMap ? 'Fechar mapa' : 'Selecionar no mapa'}
+              </Button>
+              {showMap && (
+                <div className="space-y-2">
+                  <label className="block text-xs text-gray-600" htmlFor={`map-address-${order.id}`}>Endereço correto</label>
+                  <input id={`map-address-${order.id}`} type="text" maxLength={250}
+                    value={mapAddress} onChange={event => { setMapAddress(event.target.value); setMapLocation(null); }}
+                    placeholder="Rua, número ou nome do local"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                  <Suspense fallback={<p className="text-xs">Carregando mapa...</p>}>
+                    <DeliveryLocationPicker address={mapAddress} city={order.city} state={order.state} onSelect={setMapLocation} />
+                  </Suspense>
+                  {mapLocation && <p className="text-xs text-green-700">Ponto selecionado: {mapLocation.latitude.toFixed(6)}, {mapLocation.longitude.toFixed(6)}</p>}
+                  <p className="text-xs text-gray-500">Será reaproveitado no próximo pedido apenas se o endereço e as coordenadas do iFood forem iguais.</p>
+                  <Button onClick={saveMapLocation} disabled={!mapAddress.trim() || !mapLocation || loading('coordinates')}>
+                    Confirmar e salvar ponto
+                  </Button>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => saveCoordinates()} disabled={loading('coordinates')}>
+                  {loading('coordinates') ? 'Salvando...' : 'Salvar localização'}
+                </Button>
+                {order.route_latitude != null && (
+                  <Button variant="secondary" onClick={() => saveCoordinates(true)} disabled={loading('coordinates')}>
+                    Usar localização do iFood
+                  </Button>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}

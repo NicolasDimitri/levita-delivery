@@ -72,6 +72,8 @@ create table public.clientes (
   id uuid primary key default gen_random_uuid(),
   ifood_customer_id text not null unique,
   nome text,
+  problematic boolean not null default false,
+  motivo_problematico text,
   ultimo_codigo_confirmacao text,
   ultimo_codigo_confirmado_em timestamptz,
   created_at timestamptz not null default now()
@@ -98,19 +100,11 @@ create table public.orders (
   neighborhood text,
   complement text,
   reference text,
-  route_address text,
-  corrected_latitude numeric,
-  corrected_longitude numeric,
   city text,
   state text,
   postal_code text,
   latitude numeric,
   longitude numeric,
-  constraint orders_corrected_coordinates_valid check (
-    (corrected_latitude is null and corrected_longitude is null)
-    or (corrected_latitude between -90 and 90 and corrected_longitude between -180 and 180
-        and corrected_latitude is not null and corrected_longitude is not null)
-  ),
 
   -- pagamento
   payment_category text not null check (payment_category in ('online', 'dinheiro', 'debito', 'credito')),
@@ -243,7 +237,7 @@ create index webhook_events_received_at_idx on public.webhook_events(received_at
 grant usage on schema public to authenticated;
 
 grant select, insert on public.profiles to authenticated;
-grant select on public.clientes to authenticated;
+grant select, update on public.clientes to authenticated;
 
 -- "update" em orders é necessário para o admin alterar o status de preparo
 -- pela interface. A atribuição de entregadores passa pela API serverless,

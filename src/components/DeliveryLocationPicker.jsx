@@ -36,7 +36,7 @@ export default function DeliveryLocationPicker({ address, city, state, onSelect 
     setLoading(true);
     try {
       const query = [address.trim(), city, state].filter(Boolean).join(', ');
-      const data = await call('/api/ifood/geocode-address', { body: { address: query } });
+      const data = await call('/api/ifood/store-hours-status?geocode=1', { body: { address: query } });
       setResults(data.results);
       if (!data.results.length) setError('Nenhum resultado encontrado. Ajuste a busca ou selecione o ponto no mapa.');
     } catch (e) {
