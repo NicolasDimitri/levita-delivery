@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import DeliveryCard from '../components/DeliveryCard';
 import AvailableOrderCard from '../components/AvailableOrderCard';
+import IfoodChatWidget from '../components/IfoodChatWidget';
 import { useApi } from '../lib/useApi';
 import { fmtBRL } from '../lib/constants';
 import { calculateDriverBalance } from '../lib/driverBalance';
@@ -276,6 +277,10 @@ export default function DriverPage() {
             </div>
             <button onClick={signOut} className="text-xs text-gray-400 hover:text-gray-700">Sair</button>
           </div>
+        </div>
+
+        <div className="mx-auto mt-2 max-w-md">
+          <IfoodChatWidget />
         </div>
 
         {/* abas */}
