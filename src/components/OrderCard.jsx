@@ -1,5 +1,5 @@
 // src/components/OrderCard.jsx
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useApi } from '../lib/useApi';
 import { Button, Badge, SectionLabel, ErrorMsg } from '../lib/ui';
 import CountdownTimer from './CountdownTimer';
@@ -7,6 +7,8 @@ import { ORDER_STATUS, fmtBRL, fmtDate } from '../lib/constants';
 import { supabase } from '../supabaseClient';
 import { isMissingStreetNumber } from '../../lib/deliveryAddress';
 import OrderDiscounts from './OrderDiscounts';
+
+const DeliveryLocationPicker = lazy(() => import('./DeliveryLocationPicker'));
 
 export { ORDER_STATUS };
 
@@ -21,16 +23,18 @@ export default function OrderCard({ order, drivers, onChanged }) {
   const [cancellationReasons, setCancellationReasons] = useState([]);
   const [selectedCancellation, setSelectedCancellation] = useState('');
   const [routeAddress, setRouteAddress] = useState(order.route_address || '');
+  const [showAddressEditor, setShowAddressEditor] = useState(false);
+  const [correctedLocation, setCorrectedLocation] = useState(null);
   const [error, setError] = useState('');
   const [cancellationPending, setCancellationPending] = useState(false);
 
   useEffect(() => {
     setRouteAddress(order.route_address || '');
-  }, [order.route_address]);
+    setCorrectedLocation(null);
+  }, [order.id, order.route_address, order.corrected_latitude, order.corrected_longitude]);
 
   const status = ORDER_STATUS[order.status] ?? ORDER_STATUS.recebido;
   const needsRouteAddress = !order.street || isMissingStreetNumber(order.street_number);
-  const routeAddressChanged = routeAddress.trim() !== (order.route_address || '');
 
   async function run(key, fn) {
     setLoadingKey(key);
@@ -85,14 +89,21 @@ export default function OrderCard({ order, drivers, onChanged }) {
   const saveRouteAddress = () => run('route-address', async () => {
     const value = routeAddress.trim();
     if (!value) throw new Error('Informe um endereço ou nome de local para a rota.');
+    if (!correctedLocation) throw new Error('Selecione e confirme o destino no mapa.');
 
     const { error: updateError } = await supabase
       .from('orders')
-      .update({ route_address: value })
+      .update({
+        route_address: value,
+        corrected_latitude: correctedLocation.latitude,
+        corrected_longitude: correctedLocation.longitude
+      })
       .eq('id', order.id)
+      .in('status', ['recebido', 'em_preparo', 'pronto', 'em_rota'])
       .select('id')
       .single();
     if (updateError) throw updateError;
+    setShowAddressEditor(false);
   });
 
   const assignDriver = (driverId) => {
@@ -159,32 +170,63 @@ export default function OrderCard({ order, drivers, onChanged }) {
       <OrderDiscounts benefits={order.benefits_raw} total={order.benefits_value} />
 
       <ErrorMsg message={error} />
-      {needsRouteAddress && !['entregue', 'cancelado'].includes(order.status) && (
+      {!['entregue', 'cancelado'].includes(order.status) && !showAddressEditor && (
+        <div className="space-y-2">
+          {needsRouteAddress && !order.route_address && (
+            <p className="text-sm text-amber-800">Endereço incompleto: informe o destino correto.</p>
+          )}
+          {order.route_address && (order.corrected_latitude == null || order.corrected_longitude == null) && (
+            <p className="text-sm text-amber-800">Correção anterior sem ponto confirmado. Confirme no mapa para calcular o repasse.</p>
+          )}
+          <Button variant="secondary" onClick={() => setShowAddressEditor(true)}>Corrigir destino</Button>
+        </div>
+      )}
+      {showAddressEditor && !['entregue', 'cancelado'].includes(order.status) && (
         <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
           <p className="text-sm font-medium text-amber-900">
-            Endereço incompleto: informe o destino correto para a rota.
+            Informe o endereço e confirme o ponto correto para a entrega e o cálculo do repasse.
           </p>
           <p className="text-xs text-amber-800">
             Pode ser “Rua, número” ou o nome do hotel, pousada, empresa ou comércio.
           </p>
+          <p className="text-xs text-amber-800">
+            A correção será reaproveitada no próximo pedido se o endereço e as coordenadas enviados pelo iFood forem os mesmos.
+          </p>
           <input
             type="text"
             value={routeAddress}
-            onChange={(event) => setRouteAddress(event.target.value)}
+            onChange={(event) => { setRouteAddress(event.target.value); setCorrectedLocation(null); }}
             maxLength={300}
             placeholder="Ex.: Rua das Flores, 123 ou Hotel Central"
             aria-label={`Endereço correto para a rota do pedido ${order.display_id || order.id}`}
             className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
           />
+          <Suspense fallback={<p className="text-xs">Carregando mapa...</p>}>
+            <DeliveryLocationPicker address={routeAddress} city={order.city} state={order.state} onSelect={setCorrectedLocation} />
+          </Suspense>
+          {correctedLocation && (
+            <p className="text-xs text-green-700">
+              Ponto selecionado: {correctedLocation.latitude.toFixed(6)}, {correctedLocation.longitude.toFixed(6)}
+            </p>
+          )}
           <Button
             variant="primary"
             onClick={saveRouteAddress}
-            disabled={!routeAddress.trim() || !routeAddressChanged || loading('route-address')}
+            disabled={!routeAddress.trim() || !correctedLocation || loading('route-address')}
           >
-            {loading('route-address') ? 'Salvando endereço...' : 'Salvar endereço para a rota'}
+            {loading('route-address') ? 'Salvando destino...' : 'Confirmar e salvar destino'}
           </Button>
-          {order.route_address && !routeAddressChanged && (
-            <p className="text-xs text-green-700">Endereço personalizado salvo para a rota e para cópia.</p>
+          <Button variant="secondary" onClick={() => {
+            setShowAddressEditor(false);
+            setRouteAddress(order.route_address || '');
+            setCorrectedLocation(null);
+          }}>Cancelar</Button>
+          {order.route_address && (
+            <p className="text-xs text-green-700">
+              {order.corrected_latitude == null || order.corrected_longitude == null
+                ? 'Correção anterior sem ponto confirmado: selecione o destino no mapa.'
+                : 'Destino corrigido salvo. Se precisar alterá-lo, selecione outro ponto.'}
+            </p>
           )}
         </div>
       )}

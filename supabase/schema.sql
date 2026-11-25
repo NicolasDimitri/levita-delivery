@@ -98,11 +98,19 @@ create table public.orders (
   neighborhood text,
   complement text,
   reference text,
+  route_address text,
+  corrected_latitude numeric,
+  corrected_longitude numeric,
   city text,
   state text,
   postal_code text,
   latitude numeric,
   longitude numeric,
+  constraint orders_corrected_coordinates_valid check (
+    (corrected_latitude is null and corrected_longitude is null)
+    or (corrected_latitude between -90 and 90 and corrected_longitude between -180 and 180
+        and corrected_latitude is not null and corrected_longitude is not null)
+  ),
 
   -- pagamento
   payment_category text not null check (payment_category in ('online', 'dinheiro', 'debito', 'credito')),

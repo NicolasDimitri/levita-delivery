@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import PaymentBadge from './PaymentBadge';
 import ConfirmDeliveryModal from './ConfirmDeliveryModal';
 import CountdownTimer from './CountdownTimer';
-import { buildWazeDestinationUrl, getOrderNavigationAddress } from '../../lib/deliveryAddress';
+import { buildWazeDestinationUrl, getGoogleMapsDestination, getOrderNavigationAddress } from '../../lib/deliveryAddress';
 import { useApi } from '../lib/useApi';
 import OrderDiscounts from './OrderDiscounts';
 
@@ -149,7 +149,7 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
             navigationAddress
               ? (
                   <a
-                    href={buildWazeDestinationUrl(navigationAddress)}
+                    href={buildWazeDestinationUrl(getGoogleMapsDestination(order).destination)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block w-full rounded-lg bg-blue-600 py-2 text-center text-sm font-semibold text-white hover:bg-blue-700"
