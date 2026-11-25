@@ -5,10 +5,10 @@ import { getCustomerPhone } from './customerPhone.js';
 const now = Date.parse('2026-11-24T12:00:00Z');
 const order = (phone, extra = {}) => ({ subtotal: { customer: { phone } }, ...extra });
 
-test('prepares the iFood phone and preserves the localizer for manual entry', () => {
+test('prepares the iFood phone with a wait and localizer, preserving leading zeros', () => {
   assert.deepEqual(getCustomerPhone(order({
     number: '0800 705 3040', localizer: '00123456', localizerExpiration: '2026-11-24T13:00:00Z'
-  }), now), { number: '0800 705 3040', localizer: '00123456', href: 'tel:08007053040' });
+  }), now), { number: '0800 705 3040', localizer: '00123456', href: 'tel:08007053040%3B00123456' });
   assert.equal(getCustomerPhone(order({ number: '+55 (83) 99999-9999' }), now).href, 'tel:+5583999999999');
 });
 

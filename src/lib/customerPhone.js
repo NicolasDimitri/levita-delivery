@@ -23,6 +23,6 @@ export function getCustomerPhone(order, now = Date.now()) {
   return {
     number: rawNumber,
     localizer,
-    href: `tel:${rawNumber.startsWith('+') ? '+' : ''}${digits}`,
+    href: `tel:${rawNumber.startsWith('+') ? '+' : ''}${digits}${localizer ? `%3B${localizer}` : ''}`,
   };
 }
