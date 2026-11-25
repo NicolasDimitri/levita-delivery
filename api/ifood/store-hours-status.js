@@ -10,8 +10,12 @@ import {
   isInterruptionActive
 } from '../../lib/ifood.js';
 import homologationHandler from '../../lib/ifood-homologation-handler.js';
+import { getWidgetConfig } from '../../lib/ifood-widget-config.js';
 
 export default async function handler(req, res) {
+  if (req.query?.widget === '1') {
+    return getWidgetConfig(req, res, supabaseAdmin, process.env.IFOOD_MERCHANT_IDS);
+  }
   if (req.query?.homologation === '1' || req.body?.homologation === true) {
     return homologationHandler(req, res);
   }
