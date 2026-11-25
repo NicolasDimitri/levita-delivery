@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { hideIfoodWidget, initializeIfoodWidget } from '../lib/ifoodWidget';
+import { useApi } from '../lib/useApi';
 
 const widgetId = (import.meta.env.VITE_IFOOD_WIDGET_ID || '').trim();
-const merchantIds = (import.meta.env.VITE_IFOOD_WIDGET_MERCHANT_IDS || '')
-  .split(',').map(id => id.trim()).filter(Boolean);
 
 export default function IfoodChatWidget() {
+  const { call } = useApi();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -19,7 +19,7 @@ export default function IfoodChatWidget() {
     };
   }, []);
 
-  if (!widgetId && merchantIds.length === 0) return null;
+  if (!widgetId) return null;
 
   async function toggleWidget() {
     if (visible) {
@@ -27,13 +27,10 @@ export default function IfoodChatWidget() {
       setVisible(false);
       return;
     }
-    if (!widgetId || merchantIds.length === 0 || merchantIds.length > 10) {
-      setError('Configure o ID do widget e de 1 a 10 lojas do iFood.');
-      return;
-    }
     setLoading(true);
     setError('');
     try {
+      const { merchantIds } = await call('/api/ifood/store-hours-status?widget=1', { method: 'GET' });
       const widget = await initializeIfoodWidget(widgetId, merchantIds);
       if (mounted.current) {
         widget.show();
@@ -41,7 +38,7 @@ export default function IfoodChatWidget() {
       }
     } catch (err) {
       console.error('Não foi possível iniciar o widget do iFood', err);
-      if (mounted.current) setError('Não foi possível abrir o chat do iFood. Verifique a configuração e recarregue a página.');
+      if (mounted.current) setError(err.message || 'Não foi possível abrir o chat do iFood.');
     } finally {
       if (mounted.current) setLoading(false);
     }

@@ -9,8 +9,12 @@ import {
   isOpeningHoursOpen,
   isInterruptionActive
 } from '../../lib/ifood.js';
+import { getWidgetConfig } from '../../lib/ifood-widget-config.js';
 
 export default async function handler(req, res) {
+  if (req.query?.widget === '1') {
+    return getWidgetConfig(req, res, supabaseAdmin, process.env.IFOOD_MERCHANT_IDS);
+  }
   console.log('=== [API /api/ifood/store-hours-status] REQUISIÇÃO RECEBIDA ===', {
     method: req.method,
     url: req.url,

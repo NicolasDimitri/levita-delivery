@@ -71,9 +71,9 @@ Isso só fica disponível depois de fazer o primeiro deploy (você precisa de um
 
 ### Widget de chat com clientes
 
-No [Portal do Desenvolvedor iFood](https://developer.ifood.com.br/pt-BR/widget), cadastre um widget, habilite o Chat e copie o `widgetId` do código de incorporação. Configure `VITE_IFOOD_WIDGET_ID` e `VITE_IFOOD_WIDGET_MERCHANT_IDS` (IDs das lojas separados por vírgula, até 10) no ambiente do frontend e faça um novo build/deploy. Essas variáveis são públicas: não coloque credenciais nelas.
+No [Portal do Desenvolvedor iFood](https://developer.ifood.com.br/pt-BR/widget), cadastre um widget, habilite o Chat e copie o `widgetId` do código de incorporação. Configure `VITE_IFOOD_WIDGET_ID` no frontend e `IFOOD_MERCHANT_IDS` no servidor (IDs das lojas separados por vírgula, até 10) para cada ambiente e faça um novo build/deploy. O ID do widget é público: não coloque credenciais nessa variável.
 
-No painel de pedidos do administrador, clique em **Chat iFood** para exibir o botão flutuante oficial. O próprio iFood solicita a autorização da loja quando necessário. O widget é carregado apenas ao abrir o chat e fica oculto ao sair do painel. Para desativá-lo, deixe as duas variáveis vazias. O chat e sua autenticação são gerenciados pelo iFood, independentemente do login da aplicação.
+No painel de pedidos do administrador, clique em **Chat iFood** para exibir o botão flutuante oficial. O próprio iFood solicita a autorização da loja quando necessário. O widget é carregado apenas ao abrir o chat e fica oculto ao sair do painel. Para desativá-lo, deixe `VITE_IFOOD_WIDGET_ID` vazio. O chat e sua autenticação são gerenciados pelo iFood, independentemente do login da aplicação.
 
 **Ligação para o cliente:** nos pedidos ativos, o administrador e o entregador vinculado podem abrir o discador com o telefone informado pelo iFood. Quando houver localizador, anote-o e digite-o durante a chamada; ele não é discado automaticamente. O telefone pode não estar disponível e o localizador expira. O iFood também deixa de fornecer o telefone três horas após a previsão de entrega. Nesses casos, use o chat. Pedidos disponíveis para aceite não exibem o contato antes de serem atribuídos.
 
