@@ -6,6 +6,7 @@ import CountdownTimer from './CountdownTimer';
 import { buildWazeDestinationUrl, getGoogleMapsDestination, getOrderCopyAddress } from '../../lib/deliveryAddress';
 import { useApi } from '../lib/useApi';
 import OrderDiscounts from './OrderDiscounts';
+import CallCustomer from './CallCustomer';
 
 export default function DeliveryCard({ order, navigationApp, onChanged }) {
   const [copied, setCopied] = useState(false);
@@ -143,6 +144,10 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
           </li>
         ))}
       </ul>
+
+      <div className="mb-3">
+        <CallCustomer order={order} />
+      </div>
 
       {order.status === 'em_rota' && (
         <div className="space-y-2">

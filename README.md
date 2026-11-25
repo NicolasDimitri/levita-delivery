@@ -69,6 +69,14 @@ Isso só fica disponível depois de fazer o primeiro deploy (você precisa de um
 2. Cole a URL: `https://SEU-PROJETO.vercel.app/api/ifood/webhook`
 3. Salve
 
+### Widget de chat com clientes
+
+No [Portal do Desenvolvedor iFood](https://developer.ifood.com.br/pt-BR/widget), cadastre um widget, habilite o Chat e copie o `widgetId` do código de incorporação. Configure `VITE_IFOOD_WIDGET_ID` e `VITE_IFOOD_WIDGET_MERCHANT_IDS` (IDs das lojas separados por vírgula, até 10) no ambiente do frontend e faça um novo build/deploy. Essas variáveis são públicas: não coloque credenciais nelas.
+
+No painel de pedidos do administrador, clique em **Chat iFood** para exibir o botão flutuante oficial. O próprio iFood solicita a autorização da loja quando necessário. O widget é carregado apenas ao abrir o chat e fica oculto ao sair do painel. Para desativá-lo, deixe as duas variáveis vazias. O chat e sua autenticação são gerenciados pelo iFood, independentemente do login da aplicação.
+
+**Ligação para o cliente:** nos pedidos ativos, o administrador e o entregador vinculado podem abrir o discador com o telefone informado pelo iFood. Quando houver localizador, anote-o e digite-o durante a chamada; ele não é discado automaticamente. O telefone pode não estar disponível e o localizador expira. O iFood também deixa de fornecer o telefone três horas após a previsão de entrega. Nesses casos, use o chat. Pedidos disponíveis para aceite não exibem o contato antes de serem atribuídos.
+
 ### 2.4 Pegar um token de acesso (app Centralizado usa client_credentials)
 
 ⚠️ Correção importante: o fluxo de `userCode` (autorização manual por loja) é exclusivo de apps **Distribuído**. Como nosso app é **Centralizado**, ele não suporta esse grant type — só `client_credentials`. Não tente usar `/oauth/userCode` com esse client_id, vai dar erro "Grant type not authorized for client".

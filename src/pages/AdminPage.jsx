@@ -10,6 +10,7 @@ import { calculateDriverBalance } from '../lib/driverBalance';
 import { useApi } from '../lib/useApi';
 import OrderCard from '../components/OrderCard';
 import StoreStatusToggle from '../components/StoreStatusToggle';
+import IfoodChatWidget from '../components/IfoodChatWidget';
 
 const ACTIVE_COLUMNS = [
   { status: 'recebido',   title: 'Novos pedidos' },
@@ -260,6 +261,7 @@ export default function AdminPage() {
             </div>
             <div className="flex items-center gap-3">
               <StoreStatusToggle />
+              <IfoodChatWidget />
               <Link to="/financeiro" className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Financeiro</Link>
               <Button variant="ghost" onClick={signOut}>Sair</Button>
             </div>

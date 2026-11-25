@@ -7,6 +7,7 @@ import { ORDER_STATUS, fmtBRL, fmtDate } from '../lib/constants';
 import { supabase } from '../supabaseClient';
 import { getOrderDestinationCoordinates, parseCoordinatePair } from '../../lib/deliveryAddress';
 import OrderDiscounts from './OrderDiscounts';
+import CallCustomer from './CallCustomer';
 
 export { ORDER_STATUS };
 
@@ -161,6 +162,7 @@ export default function OrderCard({ order, drivers, onChanged }) {
         </Badge>
       </div>
       <OrderDiscounts benefits={order.benefits_raw} total={order.benefits_value} />
+      {!['entregue', 'cancelado'].includes(order.status) && <CallCustomer order={order} />}
 
       <ErrorMsg message={error} />
       {canEditCoordinates && (
