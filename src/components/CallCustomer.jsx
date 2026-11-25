@@ -13,7 +13,7 @@ export default function CallCustomer({ order }) {
     <div className="space-y-1">
       {contact.localizer && (
         <p className="text-xs text-gray-600">
-          Ao ligar, digite o localizador: <strong>{contact.localizer}</strong>
+          Quando o iFood solicitar, confirme o envio do localizador no celular. Se necessário, digite: <strong>{contact.localizer}</strong>
         </p>
       )}
       <a

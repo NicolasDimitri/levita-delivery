@@ -75,7 +75,7 @@ No [Portal do Desenvolvedor iFood](https://developer.ifood.com.br/pt-BR/widget),
 
 No painel de pedidos do administrador, clique em **Chat iFood** para exibir o botão flutuante oficial. O próprio iFood solicita a autorização da loja quando necessário. O widget é carregado apenas ao abrir o chat e fica oculto ao sair do painel. Para desativá-lo, deixe `VITE_IFOOD_WIDGET_ID` vazio. O chat e sua autenticação são gerenciados pelo iFood, independentemente do login da aplicação.
 
-**Ligação para o cliente:** nos pedidos ativos, o administrador e o entregador vinculado podem abrir o discador com o telefone informado pelo iFood. Quando houver localizador, anote-o e digite-o durante a chamada; ele não é discado automaticamente. O telefone pode não estar disponível e o localizador expira. O iFood também deixa de fornecer o telefone três horas após a previsão de entrega. Nesses casos, use o chat. Pedidos disponíveis para aceite não exibem o contato antes de serem atribuídos.
+**Ligação para o cliente:** nos pedidos ativos, o administrador e o entregador vinculado podem abrir o discador com o telefone informado pelo iFood. Quando houver localizador, o link inclui uma espera antes do código: confirme seu envio no discador quando o iFood solicitar. O suporte depende do celular e do aplicativo de ligação; se necessário, digite o código mostrado no pedido. O telefone pode não estar disponível e o localizador expira. O iFood também deixa de fornecer o telefone três horas após a previsão de entrega. Nesses casos, use o chat. Pedidos disponíveis para aceite não exibem o contato antes de serem atribuídos.
 
 ### 2.4 Pegar um token de acesso (app Centralizado usa client_credentials)
 
