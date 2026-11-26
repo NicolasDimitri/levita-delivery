@@ -13,10 +13,10 @@ body {
     left: 0 !important;
     right: auto !important;
     bottom: auto !important;
-    width: 117.647059vw !important;
-    height: 117.647059vh !important;
-    height: 117.647059dvh !important;
-    transform: scale(0.85);
+    width: 125vw !important;
+    height: 125vh !important;
+    height: 125dvh !important;
+    transform: scale(0.8);
     transform-origin: top left;
   }
 
