@@ -7,6 +7,7 @@ import { buildWazeDestinationUrl, getGoogleMapsDestination, getOrderCopyAddress 
 import { useApi } from '../lib/useApi';
 import OrderDiscounts from './OrderDiscounts';
 import CallCustomer from './CallCustomer';
+import DirectionBadge from './DirectionBadge';
 
 export default function DeliveryCard({ order, navigationApp, onChanged }) {
   const [copied, setCopied] = useState(false);
@@ -118,6 +119,7 @@ export default function DeliveryCard({ order, navigationApp, onChanged }) {
         </div>
       </div>
 
+      <div className="mb-3"><DirectionBadge order={order} /></div>
       {order.status === 'em_rota' && order.delivery_date_time && (
         <div className="mb-3">
           <CountdownTimer target={order.delivery_date_time} label="Previsão de entrega" size="lg" />

@@ -66,14 +66,23 @@ export default function DriverPage() {
   }, [session]);
 
   const loadAvailableOrders = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_available_delivery_orders');
+    const [{ data, error }, directions] = await Promise.all([
+      supabase.rpc('get_available_delivery_orders'),
+      supabase.rpc('get_available_order_directions')
+    ]);
     if (error) {
       console.error('Não foi possível carregar os pedidos disponíveis', error);
       setAvailableOrdersError('Não foi possível carregar os pedidos disponíveis. Atualize a página ou tente novamente.');
       return;
     }
-    setAvailableOrdersError('');
-    setAvailableOrders(data || []);
+    if (directions.error) {
+      console.error('Não foi possível carregar as direções dos pedidos disponíveis', directions.error);
+      setAvailableOrdersError('Não foi possível carregar as direções. Atualize a página ou tente novamente.');
+    } else {
+      setAvailableOrdersError('');
+    }
+    const byId = new Map((directions.data || []).map(item => [item.id, item]));
+    setAvailableOrders((data || []).map(order => ({ ...order, ...byId.get(order.id) })));
   }, []);
 
   const loadFinishedOrders = useCallback(async () => {

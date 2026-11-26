@@ -8,6 +8,7 @@ import { supabase } from '../supabaseClient';
 import { getOrderDestinationCoordinates, parseCoordinatePair } from '../../lib/deliveryAddress';
 import OrderDiscounts from './OrderDiscounts';
 import CallCustomer from './CallCustomer';
+import DirectionBadge from './DirectionBadge';
 
 export { ORDER_STATUS };
 
@@ -133,6 +134,7 @@ export default function OrderCard({ order, drivers, onChanged }) {
         </div>
         <Badge color={status.color}>{status.label}</Badge>
       </div>
+      <DirectionBadge order={order} />
 
       {/* temporizador */}
       {order.status === 'recebido' && (

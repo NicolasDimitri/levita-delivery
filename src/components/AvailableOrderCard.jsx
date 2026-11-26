@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ORDER_STATUS } from '../lib/constants';
 import { Button, Badge, ErrorMsg } from '../lib/ui';
 import { supabase } from '../supabaseClient';
+import DirectionBadge from './DirectionBadge';
 
 export default function AvailableOrderCard({ order, activeCount, onAccepted }) {
   const [accepting, setAccepting] = useState(false);
@@ -38,6 +39,7 @@ export default function AvailableOrderCard({ order, activeCount, onAccepted }) {
         <Badge color={status.color}>{status.label}</Badge>
       </div>
 
+      <DirectionBadge order={order} />
       <ul className="space-y-0.5 text-xs text-gray-600">
         {order.order_items?.map((item) => (
           <li key={item.id}>{item.quantity}x {item.name}</li>
